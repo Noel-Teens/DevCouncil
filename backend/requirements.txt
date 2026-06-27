@@ -1,0 +1,29 @@
+# Web framework
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+sse-starlette==2.3.6
+
+# Data validation
+pydantic==2.11.3
+pydantic-settings==2.9.1
+
+# Database
+sqlalchemy[asyncio]==2.0.41
+aiosqlite==0.21.0
+
+# HTTP client
+httpx==0.28.1
+
+# Auth
+python-jose[cryptography]==3.4.0
+passlib[bcrypt]==1.7.4
+
+# LLM
+groq==0.25.0
+
+# Redis
+redis==6.2.0
+
+# Utilities
+python-dotenv==1.1.0
+python-multipart==0.0.20
