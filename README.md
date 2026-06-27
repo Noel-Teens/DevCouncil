@@ -320,55 +320,57 @@ devcouncil-ai/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                  # FastAPI app entry point
+│   │   ├── config.py                # Configuration settings
 │   │   ├── routers/
 │   │   │   ├── auth.py              # GitHub OAuth + JWT
 │   │   │   ├── analysis.py          # POST /analysis, GET /stream
 │   │   │   └── reports.py           # Report history
 │   │   ├── services/
 │   │   │   ├── ingestion.py         # GitHub API client + file extraction
-│   │   │   ├── static_analysis.py   # Bandit + Semgrep + Tree-Sitter
 │   │   │   ├── orchestrator.py      # asyncio.gather parallel agents
-│   │   │   └── consensus.py         # Conflict resolution + report assembly
+│   │   │   └── cache.py             # Caching service
 │   │   ├── agents/
 │   │   │   ├── base.py              # BaseAgent: call_llm, parse, retry
 │   │   │   ├── architect.py
 │   │   │   ├── security.py
 │   │   │   ├── code_reviewer.py
-│   │   │   ├── product_manager.py
-│   │   │   ├── qa.py
-│   │   │   ├── documentation.py
 │   │   │   └── consensus_director.py
-│   │   ├── models/
-│   │   │   ├── db.py                # SQLAlchemy models
-│   │   │   └── schemas.py           # Pydantic request/response schemas
-│   │   └── db/
-│   │       └── migrations/          # Alembic migration files
-│   ├── Dockerfile
+│   │   └── models/
+│   │       ├── db.py                # SQLAlchemy models
+│   │       └── schemas.py           # Pydantic request/response schemas
+│   ├── devcouncil.db                # SQLite database
 │   ├── requirements.txt
 │   └── .env.example
 │
 ├── frontend/
 │   ├── app/
 │   │   ├── page.tsx                 # Landing page
+│   │   ├── layout.tsx               # Root layout
+│   │   ├── globals.css              # Global styles
 │   │   ├── analyze/[id]/page.tsx    # Analysis view
-│   │   └── dashboard/page.tsx       # Report history
-│   ├── components/
-│   │   ├── DiscussionRoom.tsx       # SSE consumer, live agent messages
-│   │   ├── AgentMessage.tsx         # Message bubble (name, confidence, type)
-│   │   ├── ConsensusReport.tsx      # Final report renderer
-│   │   ├── FindingCard.tsx          # Severity badge + citation + recommendation
-│   │   └── ConflictResolution.tsx   # "Agent A overruled Agent B — reason: X"
-│   ├── lib/
-│   │   ├── api.ts                   # Backend API client
-│   │   ├── sse.ts                   # EventSource with reconnection
-│   │   └── types.ts                 # Agent message + finding types
-│   └── .env.local.example
+│   │   ├── components/
+│   │   │   ├── DiscussionRoom.tsx       # SSE consumer, live agent messages
+│   │   │   ├── AgentMessage.tsx         # Message bubble (name, confidence, type)
+│   │   │   ├── ConsensusReport.tsx      # Final report renderer
+│   │   │   ├── FindingCard.tsx          # Severity badge + citation + recommendation
+│   │   │   ├── ConflictResolution.tsx   # Conflict resolution presentation
+│   │   │   ├── RepoInput.tsx            # Repository URL input component
+│   │   │   └── SeverityBadge.tsx        # Severity indicator badge
+│   │   └── lib/
+│   │       ├── api.ts                   # Backend API client
+│   │       ├── sse.ts                   # EventSource with reconnection
+│   │       └── types.ts                 # Agent message + finding types
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── .env.local
 │
 ├── docs/
 │   ├── PROJECT_REQUIREMENTS.md
 │   ├── SYSTEM_ARCHITECTURE.md
 │   ├── IMPLEMENTATION_PLAN.md
-│   └── AI_AGENT_SPECIFICATION.md
+│   ├── AI_AGENT_SPECIFICATION.md
+│   ├── Implemented_Tasks.md
+│   └── Walkthrough.md
 │
 └── README.md
 ```
