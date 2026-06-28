@@ -114,34 +114,34 @@ The highest-impact feature is watching it happen in real time.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  🔴 LIVE  DevCouncil AI — Discussion Room                        │
+│  🔴 LIVE DevCouncil AI — Discussion Room                        │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  🏗️  Architect Agent  [confidence: 78%]              FINDING     │
+│                                                                 │
+│  🏗️  Architect Agent  [confidence: 78%]              FINDING    │
 │  ─────────────────────────────────────────────────────────────  │
 │  Recommend decomposing UserService into two bounded             │
-│  contexts. File: src/services/users.py shows clear             │
+│  contexts. File: src/services/users.py shows clear              │
 │  domain boundary at line 234.                                   │
-│                                                                   │
-│  🔐  Security Agent  [confidence: 91%]              CHALLENGE ⚡ │
+│                                                                 │
+│  🔐  Security Agent  [confidence: 91%]            CHALLENGE ⚡ │
 │  ─────────────────────────────────────────────────────────────  │
 │  Challenging architect_3. Decomposition introduces JWT          │
-│  inter-service auth — 4 new attack vectors not present in      │
+│  inter-service auth — 4 new attack vectors not present in       │
 │  current stack. Semgrep rule jwt-none-algorithm confirmed       │
 │  risk in: src/middleware/auth.py:18                             │
-│                                                                   │
-│  🏗️  Architect Agent  [confidence: 62%]              CONCEDE  ✓ │
+│                                                                 │
+│  🏗️  Architect Agent  [confidence: 62%]              CONCEDE  ✓│
 │  ─────────────────────────────────────────────────────────────  │
 │  Security concern is valid at current scale. Withdrawing        │
 │  microservices recommendation. Modular monolith preferred.      │
-│                                                                   │
-│  ⚖️  Consensus Director                           RESOLUTION  ✅ │
+│                                                                 │
+│  ⚖️  Consensus Director                         RESOLUTION  ✅ │
 │  ─────────────────────────────────────────────────────────────  │
 │  Modular monolith adopted. Security Agent's concern             │
 │  overrides architectural preference — attack surface            │
-│  expansion is disproportionate to the benefit at <1000         │
+│  expansion is disproportionate to the benefit at <1000          │
 │  users. Architect Agent conceded in round 2.                    │
-│                                                                   │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -154,19 +154,19 @@ Every message streams in real time via Server-Sent Events. Every conflict is exp
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         USER BROWSER                                │
-│              Next.js 14 · TypeScript · Tailwind · ShadCN           │
+│              Next.js 14 · TypeScript · Tailwind · ShadCN            │
 │                    SSE Consumer · Report Renderer                   │
 └───────────────────────────┬─────────────────────────────────────────┘
                             │ REST + SSE
 ┌───────────────────────────▼─────────────────────────────────────────┐
 │                       FASTAPI BACKEND                               │
 │                    (Render · Docker · Python 3.11)                  │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────────┐  │
-│  │  Ingestion  │  │ Static Anal. │  │    AI Orchestrator        │  │
-│  │  GitHub API │  │ Bandit       │  │    asyncio.gather         │  │
-│  │  File Tree  │  │ Semgrep      │  │    7 parallel agents      │  │
-│  │  Content    │  │ Tree-Sitter  │  │    Discussion Phase       │  │
-│  └─────────────┘  └──────────────┘  └───────────────────────────┘  │
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────────┐   │
+│  │  Ingestion  │  │ Static Anal. │  │    AI Orchestrator        │   │
+│  │  GitHub API │  │ Bandit       │  │    asyncio.gather         │   │
+│  │  File Tree  │  │ Semgrep      │  │    7 parallel agents      │   │
+│  │  Content    │  │ Tree-Sitter  │  │    Discussion Phase       │   │
+│  └─────────────┘  └──────────────┘  └───────────────────────────┘   │
 └───────────┬───────────────┬──────────────────────┬──────────────────┘
             │               │                      │
     ┌───────▼──────┐ ┌──────▼──────┐      ┌───────▼────────┐
