@@ -505,62 +505,10 @@ The disagreement is not a UX feature. It is an architectural property. Separate 
 
 ---
 
-## Roadmap
-
-```
-Phase 1 — Hackathon MVP (now)
-  ✅ GitHub repo ingestion
-  ✅ Architect + Security + Code Reviewer agents
-  ✅ Real-time Discussion Room (SSE)
-  ✅ Consensus Director with conflict resolution
-  ✅ Severity-coded report UI
-
-Phase 2 — Month 1–2
-  ⬜ PM + QA + Documentation agents
-  ⬜ PR review analysis (analyze a diff, not full repo)
-  ⬜ Agent confidence scores in UI
-  ⬜ Before/after diff view
-
-Phase 3 — Month 3–4
-  ⬜ GitHub App (automatic PR comments on push)
-  ⬜ Project health score over time
-  ⬜ Team collaboration features
-
-Phase 4 — Month 5–6
-  ⬜ CI/CD integration
-  ⬜ Jira / GitHub Issues auto-ticket creation
-  ⬜ Architecture diagram generator
-
-Phase 5 — Year 2
-  ⬜ Agent memory (recall previous analysis decisions)
-  ⬜ Custom agent configuration (enterprise)
-  ⬜ Auto-fix suggestions with one-click apply
-```
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and contribution guidelines.
-
-The four engineering documents in `/docs` are the source of truth:
-
-- [`PROJECT_REQUIREMENTS.md`](docs/PROJECT_REQUIREMENTS.md) — what we're building and why
-- [`SYSTEM_ARCHITECTURE.md`](docs/SYSTEM_ARCHITECTURE.md) — how it works, with full diagrams
-- [`IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — 15-day execution roadmap
-- [`AI_AGENT_SPECIFICATION.md`](docs/AI_AGENT_SPECIFICATION.md) — full agent blueprints with system prompts
-
----
 
 ## The Team
 
-Built at [Hackathon Name] · June 2025
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE) for details.
+Built at HACKHAZARDS '26 · June 2025
 
 ---
 
