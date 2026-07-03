@@ -21,6 +21,20 @@ from app.models.schemas import (
 
 logger = logging.getLogger(__name__)
 
+
+def _github_headers(accept: str = "application/vnd.github.v3+json") -> dict[str, str]:
+    """Build GitHub API headers with optional token auth."""
+    settings = get_settings()
+    headers = {
+        "Accept": accept,
+        "User-Agent": "DevCouncil-AI",
+    }
+    if settings.github_token:
+        headers["Authorization"] = f"Bearer {settings.github_token}"
+    else:
+        logger.warning("No GITHUB_TOKEN set — using unauthenticated API (60 req/hr limit)")
+    return headers
+
 # File extensions we analyze
 SUPPORTED_EXTENSIONS = {
     ".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".java",
@@ -104,10 +118,7 @@ def should_include_file(path: str, size: int) -> bool:
 async def fetch_repo_tree(owner: str, repo: str) -> list[dict]:
     """Fetch the full file tree from GitHub API."""
     url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1"
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "DevCouncil-AI",
-    }
+    headers = _github_headers()
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(url, headers=headers)
@@ -128,10 +139,7 @@ async def fetch_repo_tree(owner: str, repo: str) -> list[dict]:
 async def fetch_file_content(owner: str, repo: str, path: str) -> str | None:
     """Fetch a single file's content from GitHub API."""
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
-    headers = {
-        "Accept": "application/vnd.github.v3.raw",
-        "User-Agent": "DevCouncil-AI",
-    }
+    headers = _github_headers(accept="application/vnd.github.v3.raw")
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:
@@ -147,7 +155,7 @@ async def fetch_file_content(owner: str, repo: str, path: str) -> str | None:
 
 
 async def fetch_file_contents_batch(
-    owner: str, repo: str, file_entries: list[FileEntry], max_files: int = 40
+    owner: str, repo: str, file_entries: list[FileEntry], max_files: int = 20
 ) -> list[FileContent]:
     """Fetch contents for multiple files concurrently."""
     # Prioritize source code files over config files

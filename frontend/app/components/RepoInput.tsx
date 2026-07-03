@@ -3,16 +3,24 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "../lib/api";
+import { useAuth } from "./AuthProvider";
 
 export default function RepoInput() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    // Require auth before submitting
+    if (!isAuthenticated) {
+      router.push("/login");
+      return;
+    }
 
     const trimmedUrl = url.trim();
     if (!trimmedUrl) {
@@ -33,7 +41,12 @@ export default function RepoInput() {
       const response = await api.createAnalysis(trimmedUrl);
       router.push(`/analyze/${response.analysis_id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start analysis");
+      const message = err instanceof Error ? err.message : "Failed to start analysis";
+      if (message.includes("Authentication required") || message.includes("401")) {
+        router.push("/login");
+        return;
+      }
+      setError(message);
       setLoading(false);
     }
   };

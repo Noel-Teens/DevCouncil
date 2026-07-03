@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from jose import jwt
 
 from app.config import get_settings
@@ -15,6 +15,25 @@ from app.models.schemas import AuthCallbackRequest, TokenResponse, UserResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+async def require_auth(request: Request) -> dict:
+    """FastAPI dependency — extracts and validates JWT. Returns 401 if invalid."""
+    token = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    else:
+        token = request.cookies.get("token")
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    payload = verify_jwt_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    return payload
 
 
 def create_jwt_token(user_data: dict) -> str:
@@ -131,6 +150,26 @@ async def guest_login(response: Response):
 
 
 @router.get("/me", response_model=None)
-async def get_current_user():
-    """Get current user info (placeholder — reads from JWT in production)."""
-    return {"id": "guest", "username": "guest", "email": None, "github_id": "guest"}
+async def get_current_user(request: Request):
+    """Get current user info from JWT token."""
+    # Try Authorization header first, then cookie
+    token = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    else:
+        token = request.cookies.get("token")
+
+    if not token:
+        return {"id": "guest", "username": "guest", "email": None, "github_id": "guest"}
+
+    payload = verify_jwt_token(token)
+    if not payload:
+        return {"id": "guest", "username": "guest", "email": None, "github_id": "guest"}
+
+    return {
+        "id": payload.get("sub", "guest"),
+        "username": payload.get("username", "guest"),
+        "email": payload.get("email"),
+        "github_id": payload.get("github_id", payload.get("sub", "guest")),
+    }

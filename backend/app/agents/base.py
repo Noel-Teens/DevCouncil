@@ -42,7 +42,7 @@ class BaseAgent(ABC):
         """Build the user prompt from analysis context."""
         ...
 
-    def _build_file_tree_text(self, context: AnalysisContext, max_entries: int = 100) -> str:
+    def _build_file_tree_text(self, context: AnalysisContext, max_entries: int = 50) -> str:
         """Format the file tree as readable text."""
         lines = []
         for entry in context.file_tree[:max_entries]:
@@ -52,12 +52,14 @@ class BaseAgent(ABC):
             lines.append(f"  ... and {len(context.file_tree) - max_entries} more files")
         return "\n".join(lines)
 
-    def _build_file_contents_text(self, context: AnalysisContext, max_files: int = 15) -> str:
-        """Format file contents for the prompt."""
+    def _build_file_contents_text(self, context: AnalysisContext, max_files: int = 8) -> str:
+        """Format file contents for the prompt.
+        Reduced from 15 files/4000 chars to fit Groq free tier (12k TPM).
+        """
         sections = []
         for fc in context.file_contents[:max_files]:
             # Truncate content to manage token count
-            content = fc.content[:4000]
+            content = fc.content[:2000]
             sections.append(
                 f"--- FILE: {fc.path} [{fc.language or 'unknown'}] ---\n{content}\n--- END FILE ---"
             )
@@ -101,7 +103,7 @@ class BaseAgent(ABC):
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=self.temperature,
-                max_tokens=4096,
+                max_tokens=2048,
                 response_format={"type": "json_object"},
             )
             return response.choices[0].message.content or ""
@@ -195,3 +197,173 @@ class BaseAgent(ABC):
             summary=f"Agent failed: {last_error}",
             top_priority="",
         )
+
+    # ── Discussion Phase Methods ──
+
+    DISCUSSION_SYSTEM_PROMPT = """DISCUSSION PHASE INSTRUCTIONS
+
+You have completed your independent analysis. You will now receive the findings
+from the other specialist agents. Your job is NOT to add new findings.
+
+Your job is to READ the other agents' findings and RESPOND to them directly.
+
+You MUST reference the exact finding ID (e.g. architect_1, security_2) in every response.
+You MUST produce at least ONE challenge or escalation per discussion round.
+Saying "I agree with everything" is not permitted.
+
+Return a JSON object with a "responses" array. Each object must have these fields:
+  - "type": one of "challenge", "escalate", "agree", "concede"
+  - "target_agent": the agent name you are responding to
+  - "target_finding_id": the finding ID you are responding to
+  - "message": your detailed response (start with CHALLENGE/ESCALATING/CONFIRMING/CONCEDING)
+  - "confidence": 0-100
+
+AGENT-SPECIFIC DEBATE RULES:
+
+Security Agent:
+  - MUST challenge any Architect recommendation that adds new services,
+    increases network exposure, or removes input validation
+  - MUST escalate any finding from another agent that touches auth, secrets,
+    or injection — even if that agent rated it LOW
+
+Architect Agent:
+  - MUST challenge any Security recommendation where implementation cost is
+    disproportionate to risk at the project's current scale
+  - MUST challenge Code Reviewer findings that recommend structural changes
+    the Architect disagrees with
+
+Code Reviewer Agent:
+  - MUST flag if a Security fix would introduce code quality problems
+    (e.g., duplicated validation, increased complexity)
+  - MUST challenge Architect findings that conflict with observed code patterns
+"""
+
+    def _format_findings_for_debate(
+        self,
+        agent_outputs: list[AgentOutput],
+        exclude_agent: str | None = None,
+    ) -> str:
+        """Format all agents' findings for the debate prompt."""
+        sections = []
+        for output in agent_outputs:
+            if output.agent_name == exclude_agent:
+                continue
+            findings_text = []
+            for f in output.findings:
+                findings_text.append(
+                    f"  [{f.id}] [{f.severity}] {f.category} — {f.file_path}"
+                    f"\n    Description: {f.description}"
+                    f"\n    Recommendation: {f.recommendation}"
+                    f"\n    Confidence: {f.confidence}%"
+                )
+            section = (
+                f"--- {output.agent_name.upper()} FINDINGS ({len(output.findings)} total) ---\n"
+                f"Summary: {output.summary}\n"
+                + "\n".join(findings_text)
+                + "\n--- END ---"
+            )
+            sections.append(section)
+        return "\n\n".join(sections)
+
+    def _format_prior_debate(self, prior_turns: list[dict]) -> str:
+        """Format prior debate turns for context."""
+        if not prior_turns:
+            return "No prior debate turns."
+        lines = []
+        for t in prior_turns:
+            lines.append(
+                f"[Round {t.get('round', '?')}] {t.get('agent', '?')} "
+                f"({t.get('type', '?')}) → {t.get('target_agent', '?')}/"
+                f"{t.get('target_finding_id', '?')}: {t.get('message', '')[:200]}"
+            )
+        return "\n".join(lines)
+
+    async def discuss(
+        self,
+        own_output: AgentOutput,
+        all_outputs: list[AgentOutput],
+        prior_turns: list[dict],
+        round_number: int,
+    ) -> list[dict]:
+        """Run a discussion round: read other agents' findings and respond."""
+        other_findings_text = self._format_findings_for_debate(all_outputs, exclude_agent=self.agent_name)
+        own_findings_text = self._format_findings_for_debate([own_output])
+        prior_debate_text = self._format_prior_debate(prior_turns)
+
+        user_prompt = f"""DISCUSSION ROUND {round_number}
+
+You are the {self.agent_name.replace('_', ' ').title()} agent.
+
+YOUR OWN FINDINGS:
+{own_findings_text}
+
+OTHER AGENTS' FINDINGS:
+{other_findings_text}
+
+PRIOR DEBATE TURNS:
+{prior_debate_text}
+
+Now respond to the other agents' findings. You MUST produce at least one CHALLENGE or ESCALATE response.
+Return a JSON object: {{"responses": [...]}}
+"""
+        try:
+            raw = await asyncio.wait_for(
+                self.call_llm(self.DISCUSSION_SYSTEM_PROMPT, user_prompt),
+                timeout=20,
+            )
+            return self._parse_discussion_output(raw)
+        except Exception as e:
+            logger.warning(f"[{self.agent_name}] Discussion round {round_number} failed: {e}")
+            return []
+
+    async def force_challenge(self, all_outputs: list[AgentOutput]) -> list[dict]:
+        """Force at least one challenge when agent produced none in round 1."""
+        other_findings_text = self._format_findings_for_debate(all_outputs, exclude_agent=self.agent_name)
+
+        prompt = f"""You produced no challenges in round 1. This is not acceptable.
+Review the following findings from other agents:
+
+{other_findings_text}
+
+Identify the single finding you most disagree with, or the finding where the severity
+is most incorrect, and produce exactly one CHALLENGE response.
+You must disagree with something. If the findings are mostly correct,
+challenge the severity rating or the recommended fix approach.
+
+Return a JSON object: {{"responses": [<exactly one CHALLENGE object>]}}
+"""
+        try:
+            raw = await asyncio.wait_for(
+                self.call_llm(self.DISCUSSION_SYSTEM_PROMPT, prompt),
+                timeout=15,
+            )
+            return self._parse_discussion_output(raw)
+        except Exception as e:
+            logger.warning(f"[{self.agent_name}] force_challenge failed: {e}")
+            return []
+
+    def _parse_discussion_output(self, raw: str) -> list[dict]:
+        """Parse discussion LLM response into list of debate turn dicts."""
+        try:
+            data = json.loads(raw)
+            responses = data.get("responses", [])
+            if not isinstance(responses, list):
+                responses = [responses]
+
+            valid = []
+            for r in responses:
+                turn_type = r.get("type", "agree")
+                if turn_type not in ("challenge", "escalate", "agree", "concede"):
+                    turn_type = "agree"
+                valid.append({
+                    "type": turn_type,
+                    "target_agent": r.get("target_agent", "unknown"),
+                    "target_finding_id": r.get("target_finding_id", "unknown"),
+                    "message": r.get("message", ""),
+                    "confidence": max(0, min(100, r.get("confidence", 70))),
+                })
+            return valid
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning(f"[{self.agent_name}] Failed to parse discussion output: {e}")
+            return []
+

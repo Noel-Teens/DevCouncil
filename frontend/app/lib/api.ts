@@ -1,5 +1,6 @@
 /**
  * Backend API client — fetch wrappers for all endpoints.
+ * Includes JWT token from localStorage for authenticated requests.
  */
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -13,6 +14,15 @@ class ApiClient {
     this.baseUrl = baseUrl;
   }
 
+  private getAuthHeaders(): Record<string, string> {
+    if (typeof window === "undefined") return {};
+    const token = localStorage.getItem("dc_token");
+    if (token) {
+      return { Authorization: `Bearer ${token}` };
+    }
+    return {};
+  }
+
   private async request<T>(
     path: string,
     options: RequestInit = {}
@@ -22,6 +32,7 @@ class ApiClient {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        ...this.getAuthHeaders(),
         ...options.headers,
       },
     });

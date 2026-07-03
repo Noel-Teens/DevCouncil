@@ -1,7 +1,8 @@
 """
 Orchestrator — runs the full analysis pipeline:
+  Phase 0: Ingestion + validation
   Phase 1: Parallel agent analysis (asyncio.gather)
-  Phase 2: Discussion phase (sequential rounds)
+  Phase 2: Structured debate (3 rounds, sequential)
   Phase 3: Consensus synthesis
 All events emitted to SSE queue for real-time streaming.
 """
@@ -9,6 +10,7 @@ All events emitted to SSE queue for real-time streaming.
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 
@@ -25,6 +27,7 @@ from app.models.schemas import (
     ConsensusReport,
     DiscussionTurn,
     EventType,
+    Finding,
     TurnType,
 )
 from app.services.ingestion import ingest_repository
@@ -56,8 +59,205 @@ async def emit_event(analysis_id: str, event: AgentEvent):
     logger.debug(f"[{analysis_id}] Emitted event: {event.event_type}")
 
 
+# ─────────────────────────────────────────────────────────
+# Fix 1 — Repository Validation Gate
+# ─────────────────────────────────────────────────────────
+
+CONFIG_ONLY_EXTENSIONS = {
+    ".gradle", ".properties", ".xml", ".yaml", ".json",
+    ".lock", ".toml", ".xcworkspace", ".pbxproj", ".dart",
+}
+
+BUSINESS_LOGIC_PATTERNS = [
+    # Database / ORM
+    r"(?:SELECT|INSERT|UPDATE|DELETE)\s+",
+    r"\.query\s*\(", r"\.execute\s*\(",
+    r"session\.(add|commit|query|execute)",
+    r"\.findOne|\.findMany|\.create\s*\(",
+    r"prisma\.", r"sequelize\.", r"mongoose\.",
+    # HTTP routes
+    r"@(app|router)\.(get|post|put|delete|patch)\s*\(",
+    r"router\.(get|post|put|delete|patch)\s*\(",
+    r"app\.(get|post|put|delete|patch)\s*\(",
+    r"express\s*\(\s*\)", r"fastify\s*\(",
+    # Auth
+    r"(jwt|bcrypt|session|oauth|password|token)",
+    # External API
+    r"(requests\.(get|post)|fetch\s*\(|axios\.(get|post)|http\.(get|post))",
+    # File I/O
+    r"(open\s*\(|readFile|writeFile|fs\.)",
+]
+
+
+class InsufficientCodebaseError(Exception):
+    """Raised when a repository doesn't contain enough application code."""
+    pass
+
+
+def validate_repository(context: AnalysisContext) -> None:
+    """Validate that the repository has enough real application code to analyze.
+    Raises InsufficientCodebaseError if the repo is mostly config/scaffold.
+    """
+    app_code_exts = {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".java", ".rb", ".rs", ".cs"}
+
+    # Count application code files
+    app_files = [
+        f for f in context.file_tree
+        if any(f.path.endswith(ext) for ext in app_code_exts)
+    ]
+
+    # Count total lines of application code (approximate from file sizes)
+    total_code_lines = 0
+    for fc in context.file_contents:
+        if any(fc.path.endswith(ext) for ext in app_code_exts):
+            total_code_lines += fc.content.count("\n")
+
+    # Check if all files are config-only
+    all_config = all(
+        any(f.path.endswith(ext) for ext in CONFIG_ONLY_EXTENSIONS)
+        for f in context.file_tree
+    )
+
+    # Check AST for function/class definitions
+    has_functions = len(context.ast_summary.functions) > 0
+    has_classes = len(context.ast_summary.classes) > 0
+
+    # Check for business logic patterns in file contents
+    has_business_logic = False
+    has_substantial_function = False
+    for fc in context.file_contents:
+        for pattern in BUSINESS_LOGIC_PATTERNS:
+            if re.search(pattern, fc.content, re.IGNORECASE):
+                has_business_logic = True
+                break
+        # Check for function bodies > 5 lines
+        func_bodies = re.findall(
+            r"(?:def |function |async function |const \w+ = (?:async )?\([^)]*\) =>)\s*[^{]*\{?([^}]{200,})",
+            fc.content,
+        )
+        if func_bodies:
+            has_substantial_function = True
+
+    # Apply rejection rules
+    reasons = []
+    if total_code_lines < 200:
+        reasons.append(f"Only {total_code_lines} lines of application code (minimum: 200)")
+    if not has_functions and not has_classes:
+        reasons.append("Zero function or class definitions detected")
+    if all_config:
+        reasons.append("All files are configuration/build files only")
+    if len(app_files) < 3:
+        reasons.append(f"Only {len(app_files)} application code files (minimum: 3)")
+
+    # Accept only if meaningful code exists
+    if reasons and (not has_business_logic or not has_substantial_function):
+        logger.warning(f"Repository rejected: {reasons}")
+        raise InsufficientCodebaseError(
+            "This repository contains primarily configuration or scaffold files "
+            "with minimal application logic. DevCouncil AI is designed for "
+            "repositories with real application code — routes, services, "
+            "authentication, database access, or business logic. "
+            "Try a Python, JavaScript, TypeScript, Go, or Java application."
+        )
+
+
+# ─────────────────────────────────────────────────────────
+# Fix 3 — Finding Quality Filter
+# ─────────────────────────────────────────────────────────
+
+CONFIDENCE_THRESHOLDS = {
+    "CRITICAL": 70,
+    "HIGH": 65,
+    "MEDIUM": 60,
+    "LOW": 55,
+    "INFO": 999,  # Always suppress INFO
+}
+
+SECURITY_CATEGORIES = {
+    "CVE", "Injection", "XSS", "Hardcoded Secret", "Broken Auth",
+    "CSRF", "Security Misconfiguration", "Network Exposure",
+}
+
+ARCHITECT_CATEGORIES = {
+    "Code Smell", "Architecture Pattern", "Naming", "Complexity",
+    "Dependency Management",
+}
+
+VAGUE_PHRASES = [
+    "may cause issues",
+    "could lead to problems",
+    "might introduce risks",
+    "should be reviewed",
+    "potential security risk",
+    "may introduce",
+    "could potentially",
+]
+
+
+def filter_finding(finding: Finding, agent_name: str) -> bool:
+    """Return True if finding passes all quality gates, False to suppress."""
+    severity = finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity)
+
+    # GATE 1 — Confidence threshold
+    threshold = CONFIDENCE_THRESHOLDS.get(severity, 60)
+    if finding.confidence < threshold:
+        logger.debug(f"Suppressed {finding.id}: confidence {finding.confidence} < {threshold}")
+        return False
+
+    # INFO is always suppressed
+    if severity == "INFO":
+        return False
+
+    desc = finding.description
+    rec = finding.recommendation
+
+    # GATE 2 — Specificity (must cite something real)
+    has_file_path = bool(re.search(r"[a-zA-Z0-9_\-]+\.[a-z]{1,5}(?::[Ll]?\d+)?", desc))
+    has_function = bool(re.search(r"\w+\(\)", desc))
+    has_line = bool(re.search(r"(?:line\s*|:L?)\d+", desc, re.IGNORECASE))
+    has_dep_version = bool(re.search(r"\w+@[\d.]+", desc))
+
+    if not (has_file_path or has_function or has_line or has_dep_version):
+        # Check if file_path field has a real path (not "unknown")
+        if finding.file_path in ("unknown", "", "N/A"):
+            logger.debug(f"Suppressed {finding.id}: no specific file/function/line reference")
+            return False
+
+    # GATE 3 — Concrete consequence (reject vague language)
+    combined = f"{desc} {rec}".lower()
+    vague_count = sum(1 for phrase in VAGUE_PHRASES if phrase in combined)
+    # If the description is ONLY vague with no concrete language, suppress
+    has_concrete = bool(re.search(
+        r"(results? in|causes?|leads? to|enables?|allows?|exposes?|"
+        r"OOM|crash|data loss|unauthorized|injection|bypass|leak|breach|"
+        r"denial of service|remote code|privilege escalation)",
+        combined,
+    ))
+    if vague_count > 0 and not has_concrete:
+        logger.debug(f"Suppressed {finding.id}: vague consequence without concrete impact")
+        return False
+
+    # GATE 4 — Domain boundary
+    category = finding.category
+    if agent_name == "security" and category in ARCHITECT_CATEGORIES:
+        logger.debug(f"Suppressed {finding.id}: security agent out of domain ({category})")
+        return False
+    if agent_name == "architect" and category in SECURITY_CATEGORIES:
+        logger.debug(f"Suppressed {finding.id}: architect agent out of domain ({category})")
+        return False
+    if agent_name == "code_reviewer" and category in SECURITY_CATEGORIES:
+        logger.debug(f"Suppressed {finding.id}: code_reviewer agent out of domain ({category})")
+        return False
+
+    return True
+
+
+# ─────────────────────────────────────────────────────────
+# Pipeline
+# ─────────────────────────────────────────────────────────
+
 async def run_analysis_pipeline(analysis_id: str, repo_url: str, db_session=None):
-    """Full analysis pipeline: ingest → analyze → discuss → consensus."""
+    """Full analysis pipeline: ingest → validate → analyze → debate → consensus."""
     try:
         # ── Phase 0: Ingestion ──
         await emit_event(analysis_id, AgentEvent(
@@ -66,6 +266,29 @@ async def run_analysis_pipeline(analysis_id: str, repo_url: str, db_session=None
         ))
 
         context = await ingest_repository(repo_url)
+
+        # ── Validation Gate (Fix 1) ──
+        try:
+            validate_repository(context)
+        except InsufficientCodebaseError as e:
+            await emit_event(analysis_id, AgentEvent(
+                event_type=EventType.ANALYSIS_FAILED,
+                data={
+                    "message": str(e),
+                    "error_code": "INSUFFICIENT_CODEBASE",
+                    "suggested_repos": [
+                        "https://github.com/OWASP/WebGoat",
+                        "https://github.com/tiangolo/full-stack-fastapi-template",
+                        "https://github.com/gothinkster/realworld",
+                    ],
+                },
+            ))
+            _analysis_results[analysis_id] = {
+                "status": AnalysisStatus.FAILED,
+                "repo_url": repo_url,
+                "error": str(e),
+            }
+            return
 
         await emit_event(analysis_id, AgentEvent(
             event_type=EventType.STATUS_UPDATE,
@@ -89,14 +312,14 @@ async def run_analysis_pipeline(analysis_id: str, repo_url: str, db_session=None
             ))
             return
 
-        # ── Phase 2: Discussion Phase ──
+        # ── Phase 2: Structured Debate (Fix 2) ──
         await emit_event(analysis_id, AgentEvent(
             event_type=EventType.STATUS_UPDATE,
             data={"status": AnalysisStatus.DISCUSSING, "message": "Agents are debating findings..."},
         ))
 
         discussion_turns = await _run_discussion_phase(
-            analysis_id, context, agent_outputs
+            analysis_id, agent_outputs
         )
 
         # ── Phase 3: Consensus ──
@@ -161,7 +384,7 @@ async def _run_parallel_analysis(
     analysis_id: str,
     context: AnalysisContext,
 ) -> tuple[list[AgentOutput], list[str]]:
-    """Phase 1: Run all agents in parallel."""
+    """Phase 1: Run all agents in parallel. Apply finding quality filter."""
     agents = [
         ArchitectAgent(),
         SecurityAgent(),
@@ -176,9 +399,17 @@ async def _run_parallel_analysis(
             data={"message": f"{agent.agent_name.replace('_', ' ').title()} is analyzing..."},
         ))
 
-    # Run all agents in parallel
-    tasks = [agent.analyze(context) for agent in agents]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # Run agents sequentially with stagger delay to avoid Groq TPM rate limits
+    # (Free tier: 12,000 TPM — parallel calls would exceed this)
+    results: list[AgentOutput | Exception] = []
+    for i, agent in enumerate(agents):
+        if i > 0:
+            await asyncio.sleep(3)  # 3s stagger between agents
+        try:
+            result = await agent.analyze(context)
+            results.append(result)
+        except Exception as e:
+            results.append(e)
 
     agent_outputs: list[AgentOutput] = []
     failed_agents: list[str] = []
@@ -200,6 +431,16 @@ async def _run_parallel_analysis(
                 data={"message": result.summary},
             ))
         else:
+            # Fix 3 — Apply finding quality filter
+            filtered_findings = [
+                f for f in result.findings
+                if filter_finding(f, agent.agent_name)
+            ]
+            suppressed = len(result.findings) - len(filtered_findings)
+            if suppressed > 0:
+                logger.info(f"[{agent.agent_name}] Suppressed {suppressed} low-quality findings")
+            result.findings = filtered_findings
+
             agent_outputs.append(result)
             # Emit each finding individually for real-time streaming
             for finding in result.findings:
@@ -224,24 +465,18 @@ async def _run_parallel_analysis(
 
 async def _run_discussion_phase(
     analysis_id: str,
-    context: AnalysisContext,
     agent_outputs: list[AgentOutput],
 ) -> list[DiscussionTurn]:
-    """Phase 2: Sequential discussion rounds.
-    Each agent sees other agents' summaries and can challenge/agree.
-    Max 3 rounds to keep total time under 15 seconds.
+    """Phase 2: Structured debate — agents read each other's findings and respond.
+    3 rounds max. Each agent produces challenges, escalations, agreements, or concessions.
     """
-    from app.config import get_settings
-    settings = get_settings()
-
     discussion_turns: list[DiscussionTurn] = []
-
-    # Build agent summaries for cross-referencing
-    agent_map: dict[str, AgentOutput] = {o.agent_name: o for o in agent_outputs}
 
     # Only run discussion if we have 2+ agents
     if len(agent_outputs) < 2:
         return discussion_turns
+
+    agent_map: dict[str, AgentOutput] = {o.agent_name: o for o in agent_outputs}
 
     agents = [
         ArchitectAgent(),
@@ -250,85 +485,71 @@ async def _run_discussion_phase(
     ]
     active_agents = [a for a in agents if a.agent_name in agent_map]
 
-    for round_num in range(1, min(settings.max_discussion_rounds + 1, 3)):
-        for agent in active_agents:
-            # Build context with other agents' summaries
-            other_summaries = [
-                AgentSummary(
-                    agent_name=o.agent_name,
-                    summary=o.summary,
-                    top_priority=o.top_priority,
-                    finding_count=len(o.findings),
-                )
-                for o in agent_outputs
-                if o.agent_name != agent.agent_name
-            ]
+    all_debate_turns: list[dict] = []
 
-            discussion_context = context.model_copy()
-            discussion_context.other_agent_summaries = other_summaries
+    for round_num in range(1, 4):  # 3 rounds
+        for agent in active_agents:
+            own_output = agent_map[agent.agent_name]
 
             try:
-                result = await asyncio.wait_for(
-                    agent.analyze(discussion_context),
-                    timeout=15,  # Shorter timeout for discussion
+                responses = await agent.discuss(
+                    own_output=own_output,
+                    all_outputs=agent_outputs,
+                    prior_turns=all_debate_turns,
+                    round_number=round_num,
                 )
 
-                # Look for challenges in findings
-                for finding in result.findings:
-                    if "CHALLENGE" in finding.description.upper():
-                        turn = DiscussionTurn(
-                            round_number=round_num,
-                            agent_name=agent.agent_name,
-                            turn_type=TurnType.CHALLENGE,
-                            target_agent=_extract_target_agent(finding.description),
-                            target_finding_id=_extract_target_finding(finding.description),
-                            message=finding.description,
-                            confidence=finding.confidence,
-                        )
-                    else:
-                        turn = DiscussionTurn(
-                            round_number=round_num,
-                            agent_name=agent.agent_name,
-                            turn_type=TurnType.AGREE if round_num > 1 else TurnType.NEW_FINDING,
-                            message=finding.description,
-                            confidence=finding.confidence,
-                        )
+                # ENFORCEMENT: if zero challenges in round 1, force one
+                challenges = [r for r in responses if r.get("type") in ("challenge", "escalate")]
+                if len(challenges) == 0 and round_num == 1:
+                    logger.info(f"[{agent.agent_name}] Forcing challenge (none produced in round 1)")
+                    forced = await agent.force_challenge(agent_outputs)
+                    responses.extend(forced)
 
+                # Emit each response to SSE stream
+                for response in responses:
+                    turn_type_str = response.get("type", "agree")
+                    # Map string type to TurnType enum
+                    turn_type_map = {
+                        "challenge": TurnType.CHALLENGE,
+                        "escalate": TurnType.ESCALATE,
+                        "agree": TurnType.AGREE,
+                        "concede": TurnType.CONCEDE,
+                    }
+                    turn_type = turn_type_map.get(turn_type_str, TurnType.NEW_FINDING)
+
+                    turn = DiscussionTurn(
+                        round_number=round_num,
+                        agent_name=agent.agent_name,
+                        turn_type=turn_type,
+                        target_agent=response.get("target_agent"),
+                        target_finding_id=response.get("target_finding_id"),
+                        message=response.get("message", ""),
+                        confidence=response.get("confidence"),
+                    )
                     discussion_turns.append(turn)
+
+                    # Track for prior context
+                    all_debate_turns.append({
+                        "round": round_num,
+                        "agent": agent.agent_name,
+                        "type": turn_type_str,
+                        "target_agent": response.get("target_agent"),
+                        "target_finding_id": response.get("target_finding_id"),
+                        "message": response.get("message", ""),
+                        "confidence": response.get("confidence"),
+                    })
+
                     await emit_event(analysis_id, AgentEvent(
                         event_type=EventType.DISCUSSION_MESSAGE,
                         agent_name=agent.agent_name,
                         data=turn.model_dump(),
                     ))
 
-            except asyncio.TimeoutError:
-                logger.warning(f"Discussion round {round_num} timed out for {agent.agent_name}")
             except Exception as e:
-                logger.warning(f"Discussion error for {agent.agent_name}: {e}")
-
-        # After round 1, just do a single summary round to save time/cost
-        if round_num == 1:
-            break
+                logger.warning(f"Discussion round {round_num} failed for {agent.agent_name}: {e}")
 
     return discussion_turns
-
-
-def _extract_target_agent(description: str) -> str | None:
-    """Extract the target agent name from a CHALLENGE description."""
-    import re
-    match = re.search(r"CHALLENGE\s+(\w+)_\d+", description, re.IGNORECASE)
-    if match:
-        return match.group(1)
-    return None
-
-
-def _extract_target_finding(description: str) -> str | None:
-    """Extract the target finding ID from a CHALLENGE description."""
-    import re
-    match = re.search(r"CHALLENGE\s+(\w+_\d+)", description, re.IGNORECASE)
-    if match:
-        return match.group(1)
-    return None
 
 
 async def _run_consensus(

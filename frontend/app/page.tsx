@@ -1,4 +1,5 @@
 import RepoInput from "./components/RepoInput";
+import Navbar from "./components/Navbar";
 
 const FEATURES = [
   {
@@ -48,33 +49,7 @@ const STEPS = [
 export default function Home() {
   return (
     <div className="flex flex-col min-h-screen">
-      {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-[var(--border)]">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
-              style={{ background: "var(--gradient-primary)" }}
-            >
-              DC
-            </div>
-            <span className="font-bold text-[var(--text-primary)] text-lg tracking-tight">
-              DevCouncil
-              <span className="text-[var(--accent)] ml-1">AI</span>
-            </span>
-          </div>
-          <div className="flex items-center gap-4">
-            <a
-              href="https://github.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-            >
-              GitHub
-            </a>
-          </div>
-        </div>
-      </nav>
+      <Navbar />
 
       {/* Hero Section */}
       <main className="flex-1 hero-bg grid-pattern">

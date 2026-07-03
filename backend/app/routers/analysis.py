@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from app.models.schemas import (
@@ -26,6 +26,7 @@ from app.services.orchestrator import (
     get_event_queue,
     run_analysis_pipeline,
 )
+from app.routers.auth import require_auth
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analysis", tags=["analysis"])
@@ -38,8 +39,9 @@ _active_analyses: dict[str, dict] = {}
 async def create_analysis(
     request: AnalysisRequest,
     background_tasks: BackgroundTasks,
+    user: dict = Depends(require_auth),
 ):
-    """Submit a repository for analysis."""
+    """Submit a repository for analysis. Requires authentication."""
     repo_url = request.repo_url.strip()
 
     # Basic URL validation

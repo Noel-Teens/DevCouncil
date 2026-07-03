@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { AgentEvent } from "../lib/types";
 import { connectToAnalysis } from "../lib/sse";
 import AgentMessage from "./AgentMessage";
@@ -14,31 +14,50 @@ export default function DiscussionRoom({ analysisId, onComplete }: DiscussionRoo
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [isStreaming, setIsStreaming] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "done" | "error">("connecting");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
+  const onCompleteRef = useRef(onComplete);
 
+  // Keep the ref in sync without causing re-connections
   useEffect(() => {
-    setConnectionStatus("connected");
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  const connect = useCallback(() => {
+    // Clean up previous connection if any
+    cleanupRef.current?.();
+    setConnectionStatus("connecting");
+    setErrorMessage(null);
 
     const cleanup = connectToAnalysis(
       analysisId,
       (event) => {
         setEvents((prev) => [...prev, event]);
+        setConnectionStatus("connected");
 
-        // Check for completion events
-        if (
-          event.event_type === "analysis_complete" ||
-          event.event_type === "analysis_failed" ||
-          event.event_type === "consensus_complete"
-        ) {
-          if (event.event_type !== "consensus_complete") {
-            setIsStreaming(false);
-            setConnectionStatus("done");
-          }
-          onComplete?.();
+        // Handle terminal events
+        if (event.event_type === "analysis_failed") {
+          setIsStreaming(false);
+          setConnectionStatus("done");
+          setErrorMessage(
+            (event.data?.message as string) || "Analysis failed"
+          );
+          onCompleteRef.current?.();
+        } else if (event.event_type === "analysis_complete") {
+          setIsStreaming(false);
+          setConnectionStatus("done");
+          onCompleteRef.current?.();
+        } else if (event.event_type === "consensus_complete") {
+          // Consensus is ready — also mark streaming as done
+          setIsStreaming(false);
+          setConnectionStatus("done");
+          onCompleteRef.current?.();
         }
       },
       () => {
         setConnectionStatus("error");
+        setErrorMessage("Lost connection to the analysis stream.");
       },
       () => {
         setIsStreaming(false);
@@ -46,8 +65,15 @@ export default function DiscussionRoom({ analysisId, onComplete }: DiscussionRoo
       }
     );
 
-    return cleanup;
-  }, [analysisId, onComplete]);
+    cleanupRef.current = cleanup;
+  }, [analysisId]);
+
+  useEffect(() => {
+    connect();
+    return () => {
+      cleanupRef.current?.();
+    };
+  }, [connect]);
 
   // Auto-scroll
   useEffect(() => {
@@ -105,6 +131,34 @@ export default function DiscussionRoom({ analysisId, onComplete }: DiscussionRoo
           </span>
         </div>
       </div>
+
+      {/* Error banner */}
+      {connectionStatus === "error" && (
+        <div className="flex items-center justify-between gap-3 px-5 py-3 bg-red-500/8 border-b border-red-500/15 animate-fade-in">
+          <div className="flex items-center gap-2 text-sm text-red-400">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+            <span>{errorMessage || "Connection lost. Events may have been missed."}</span>
+          </div>
+          <button
+            onClick={connect}
+            className="text-xs font-semibold text-[var(--accent)] hover:text-[var(--accent-hover)] bg-[var(--accent)]/10 px-3 py-1 rounded-full transition-colors"
+          >
+            Reconnect
+          </button>
+        </div>
+      )}
+
+      {/* Failure banner (analysis itself failed) */}
+      {errorMessage && connectionStatus === "done" && (
+        <div className="flex items-center gap-2 px-5 py-3 bg-red-500/8 border-b border-red-500/15 animate-fade-in">
+          <svg className="w-4 h-4 flex-shrink-0 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
+          </svg>
+          <span className="text-sm text-red-400">{errorMessage}</span>
+        </div>
+      )}
 
       {/* Messages */}
       <div

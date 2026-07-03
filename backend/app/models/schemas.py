@@ -4,7 +4,7 @@ Pydantic schemas for all API request/response types and agent data structures.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal, Optional
 
@@ -43,6 +43,7 @@ class AgentStatus(str, Enum):
 
 class TurnType(str, Enum):
     CHALLENGE = "challenge"
+    ESCALATE = "escalate"
     AGREE = "agree"
     CONCEDE = "concede"
     NEW_FINDING = "new_finding"
@@ -193,7 +194,7 @@ class AgentEvent(BaseModel):
     event_type: EventType
     agent_name: str | None = None
     data: dict = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ──────────────────────────────────────────────

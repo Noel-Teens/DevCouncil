@@ -56,7 +56,7 @@ No preamble, no explanation outside the JSON."""
 
     def build_user_prompt(self, context: AnalysisContext) -> str:
         file_tree = self._build_file_tree_text(context)
-        file_contents = self._build_file_contents_text(context, max_files=20)
+        file_contents = self._build_file_contents_text(context)
         ast = self._build_ast_text(context)
         agent_summaries = self._build_other_agent_summaries_text(context)
 

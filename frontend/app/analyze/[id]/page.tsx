@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, use } from "react";
 import Link from "next/link";
+import Navbar from "../../components/Navbar";
 import DiscussionRoom from "../../components/DiscussionRoom";
 import ConsensusReportView from "../../components/ConsensusReport";
 import { api } from "../../lib/api";
@@ -17,13 +18,16 @@ export default function AnalyzePage({ params }: AnalyzePageProps) {
   const [analysisData, setAnalysisData] = useState<AnalysisResult | null>(null);
   const [activeTab, setActiveTab] = useState<"discussion" | "report">("discussion");
   const [isComplete, setIsComplete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleAnalysisComplete = useCallback(() => {
     setIsComplete(true);
     // Fetch the final result
     api.getAnalysis(analysisId).then((data: AnalysisResult) => {
       setAnalysisData(data);
-      if (data.consensus_report) {
+      if (data.status === "failed") {
+        setError(data.error || "Analysis failed");
+      } else if (data.consensus_report) {
         setReport(data.consensus_report);
         setActiveTab("report");
       }
@@ -37,54 +41,48 @@ export default function AnalyzePage({ params }: AnalyzePageProps) {
         setAnalysisData(data);
         setReport(data.consensus_report);
         setIsComplete(true);
+      } else if (data.status === "failed") {
+        setError(data.error || "Analysis failed");
+        setIsComplete(true);
       }
     }).catch(() => {
       // Analysis not yet available, SSE will handle it
     });
   }, [analysisId]);
 
+  // Status badge for the navbar
+  const statusBadge = (
+    <div className="flex items-center gap-3">
+      {isComplete ? (
+        error ? (
+          <span className="flex items-center gap-1.5 text-xs text-red-400 bg-red-400/10 px-3 py-1 rounded-full border border-red-400/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+            Failed
+          </span>
+        ) : (
+          <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-400/20">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            Complete
+          </span>
+        )
+      ) : (
+        <span className="flex items-center gap-1.5 text-xs text-[var(--accent)] bg-[var(--accent)]/10 px-3 py-1 rounded-full border border-[var(--accent)]/20">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
+          Analyzing
+        </span>
+      )}
+    </div>
+  );
+
   return (
     <div className="min-h-screen flex flex-col bg-[var(--background)]">
-      {/* Header */}
-      <header className="glass border-b border-[var(--border)] sticky top-0 z-50">
-        <div className="max-w-[1600px] mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-              <div
-                className="w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold"
-                style={{ background: "var(--gradient-primary)" }}
-              >
-                DC
-              </div>
-              <span className="font-bold text-sm text-[var(--text-primary)]">
-                DevCouncil<span className="text-[var(--accent)]">AI</span>
-              </span>
-            </Link>
-            <span className="text-[var(--text-muted)] text-xs">/</span>
-            <span className="text-xs text-[var(--text-muted)] font-mono">
-              {analysisId.slice(0, 8)}...
-            </span>
-          </div>
-
-          {/* Status badge */}
-          <div className="flex items-center gap-3">
-            {isComplete ? (
-              <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-400/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                Complete
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-xs text-[var(--accent)] bg-[var(--accent)]/10 px-3 py-1 rounded-full border border-[var(--accent)]/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
-                Analyzing
-              </span>
-            )}
-          </div>
-        </div>
-      </header>
+      <Navbar
+        breadcrumb={analysisId.slice(0, 8) + "..."}
+        rightContent={statusBadge}
+      />
 
       {/* Tab bar */}
-      <div className="border-b border-[var(--border)] bg-[var(--background)]">
+      <div className="border-b border-[var(--border)] bg-[var(--background)] pt-14">
         <div className="max-w-[1600px] mx-auto px-6">
           <div className="flex gap-1">
             <button
@@ -131,7 +129,26 @@ export default function AnalyzePage({ params }: AnalyzePageProps) {
 
         {activeTab === "report" && (
           <div>
-            {report ? (
+            {error ? (
+              /* Error state — analysis failed */
+              <div className="glass-card p-16 text-center animate-fade-in-up">
+                <div className="w-16 h-16 mx-auto mb-6 rounded-2xl flex items-center justify-center text-3xl bg-red-500/10">
+                  ❌
+                </div>
+                <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
+                  Analysis Failed
+                </h3>
+                <p className="text-sm text-[var(--text-muted)] max-w-md mx-auto mb-6">
+                  {error}
+                </p>
+                <Link
+                  href="/"
+                  className="btn-primary inline-flex items-center gap-2 text-sm px-6 py-2.5"
+                >
+                  Try Another Repository
+                </Link>
+              </div>
+            ) : report ? (
               <ConsensusReportView report={report} />
             ) : (
               <div className="glass-card p-16 text-center">

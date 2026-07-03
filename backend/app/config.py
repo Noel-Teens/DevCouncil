@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     github_client_secret: str = ""
     github_redirect_uri: str = "http://localhost:3000/api/auth/callback"
 
+    # GitHub API token for repo ingestion (PAT with public_repo scope)
+    github_token: str = ""
+
     # JWT
     jwt_secret: str = "change-this-in-production"
     jwt_algorithm: str = "HS256"
@@ -31,7 +34,7 @@ class Settings(BaseSettings):
     agent_timeout_seconds: int = 30
     max_discussion_rounds: int = 3
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": (".env", ".env.local"), "env_file_encoding": "utf-8"}
 
 
 @lru_cache()
