@@ -1,4 +1,5 @@
 import RepoInput from "./components/RepoInput";
+import RepoSelector from "./components/RepoSelector";
 import Navbar from "./components/Navbar";
 
 const FEATURES = [
@@ -97,6 +98,8 @@ export default function Home() {
             >
               <RepoInput />
             </div>
+
+            <RepoSelector />
 
             {/* Social proof */}
             <div

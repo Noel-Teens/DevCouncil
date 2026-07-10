@@ -30,6 +30,7 @@ class User(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid4()))
     github_id = Column(String(50), unique=True, nullable=False)
+    github_token = Column(String(255), nullable=True)
     email = Column(String(255), nullable=True)
     username = Column(String(100), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

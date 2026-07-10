@@ -60,6 +60,18 @@ class ApiClient {
     return this.request("/api/reports");
   }
 
+  async getUserRepos(): Promise<Array<{
+    id: number;
+    name: string;
+    full_name: string;
+    html_url: string;
+    description: string | null;
+    language: string | null;
+    updated_at: string;
+  }>> {
+    return this.request("/api/repos");
+  }
+
   async getReport(analysisId: string): Promise<AnalysisResult> {
     return this.request<AnalysisResult>(`/api/reports/${analysisId}`);
   }

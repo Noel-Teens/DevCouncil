@@ -11,6 +11,10 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from jose import jwt
 
 from app.config import get_settings
+from app.models.db import get_db, User
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from fastapi import Depends
 from app.models.schemas import AuthCallbackRequest, TokenResponse, UserResponse
 
 logger = logging.getLogger(__name__)
@@ -61,7 +65,7 @@ def verify_jwt_token(token: str) -> dict | None:
 
 
 @router.post("/github/callback", response_model=TokenResponse)
-async def github_callback(request: AuthCallbackRequest, response: Response):
+async def github_callback(request: AuthCallbackRequest, response: Response, db: AsyncSession = Depends(get_db)):
     """Exchange GitHub OAuth code for access token, then create JWT."""
     settings = get_settings()
 
@@ -107,6 +111,25 @@ async def github_callback(request: AuthCallbackRequest, response: Response):
             raise HTTPException(status_code=400, detail="Failed to fetch GitHub user")
 
         user_data = user_resp.json()
+        github_id_str = str(user_data.get("id"))
+
+    # Upsert user into DB
+    result = await db.execute(select(User).where(User.github_id == github_id_str))
+    user = result.scalar_one_or_none()
+    if user:
+        user.github_token = access_token
+        user.username = user_data.get("login", "unknown")
+        user.email = user_data.get("email")
+    else:
+        user = User(
+            id=github_id_str,
+            github_id=github_id_str,
+            github_token=access_token,
+            username=user_data.get("login", "unknown"),
+            email=user_data.get("email"),
+        )
+        db.add(user)
+    await db.commit()
 
     # Create JWT
     jwt_token = create_jwt_token({
