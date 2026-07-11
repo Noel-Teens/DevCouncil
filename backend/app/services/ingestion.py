@@ -18,6 +18,7 @@ from app.models.schemas import (
     FileEntry,
     StaticAnalysisOutput,
 )
+from app.services.static_analysis import run_bandit
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +116,8 @@ def should_include_file(path: str, size: int) -> bool:
     return True
 
 
-async def fetch_repo_tree(owner: str, repo: str) -> list[dict]:
-    """Fetch the full file tree from GitHub API."""
+async def fetch_repo_tree(owner: str, repo: str) -> tuple[list[dict], str | None]:
+    """Fetch the full file tree from GitHub API. Returns (blobs, tree_sha)."""
     url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1"
     headers = _github_headers()
 
@@ -130,10 +131,11 @@ async def fetch_repo_tree(owner: str, repo: str) -> list[dict]:
 
         data = resp.json()
         # Filter to blobs (files) only
-        return [
+        blobs = [
             item for item in data.get("tree", [])
             if item.get("type") == "blob"
         ]
+        return blobs, data.get("sha")
 
 
 async def fetch_file_content(owner: str, repo: str, path: str) -> str | None:
@@ -288,7 +290,7 @@ async def ingest_repository(repo_url: str) -> AnalysisContext:
     logger.info(f"Ingesting repository: {owner}/{repo}")
 
     # Fetch file tree
-    tree_items = await fetch_repo_tree(owner, repo)
+    tree_items, commit_sha = await fetch_repo_tree(owner, repo)
 
     # Build file entries
     settings = get_settings()
@@ -326,11 +328,18 @@ async def ingest_repository(repo_url: str) -> AnalysisContext:
     # Detect primary language
     primary_language = detect_primary_language(file_entries)
 
+    # Static analysis grounding — run Bandit on Python files (best-effort)
+    bandit_findings = await run_bandit(file_contents)
+    if bandit_findings:
+        logger.info(f"Bandit produced {len(bandit_findings)} findings")
+
     return AnalysisContext(
         repo_url=repo_url,
         repo_name=f"{owner}/{repo}",
+        commit_sha=commit_sha,
         primary_language=primary_language,
         file_tree=file_entries,
         file_contents=file_contents,
+        static_analysis=StaticAnalysisOutput(bandit_findings=bandit_findings),
         ast_summary=ast_summary,
     )

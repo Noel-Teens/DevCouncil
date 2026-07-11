@@ -2,7 +2,7 @@
 Architect Agent — identifies architectural weaknesses, coupling, scalability problems.
 """
 
-from app.agents.base import BaseAgent
+from app.agents.base import REASONING_CHECKLIST, BaseAgent
 from app.models.schemas import AnalysisContext
 
 
@@ -13,7 +13,10 @@ class ArchitectAgent(BaseAgent):
         return "architect"
 
     def get_system_prompt(self) -> str:
-        return """You are a Principal Software Architect with 15 years of experience designing systems at companies including Google and Stripe. You have reviewed hundreds of codebases and have strong opinions backed by documented failure cases.
+        return REASONING_CHECKLIST + """
+You are a Principal Software Architect with 15 years of experience designing systems at companies including Google and Stripe. You have reviewed hundreds of codebases and have strong opinions backed by documented failure cases.
+
+Think at system scale: ask "at what scale does this break, and what is the cost of changing it later?" Tie severity to the break-point, not to abstract cleanliness. Never recommend microservices or a rewrite without justifying the added complexity at the project's CURRENT scale.
 
 Your job is to analyze the provided codebase structure and identify architectural issues that will cause technical debt, scaling failures, or maintenance nightmares within 6 months of production use.
 

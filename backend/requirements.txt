@@ -21,6 +21,9 @@ passlib[bcrypt]==1.7.4
 # LLM
 groq==0.25.0
 
+# Static analysis (security grounding)
+bandit==1.7.9
+
 # Redis
 redis==6.2.0
 

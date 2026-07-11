@@ -24,6 +24,12 @@ export default function ConsensusReportView({ report }: ConsensusReportViewProps
     }
   }
 
+  // How many findings are anchored to real static-analysis (Bandit) output —
+  // concrete proof the findings aren't hallucinated.
+  const verifiedCount = report.findings.filter(
+    (f) => f.verified || f.source === "bandit"
+  ).length;
+
   return (
     <div className="space-y-8" id="consensus-report">
       {/* Executive Summary */}
@@ -56,6 +62,14 @@ export default function ConsensusReportView({ report }: ConsensusReportViewProps
               {report.conflicts_resolved.length}
             </span>
           </div>
+          {verifiedCount > 0 && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-emerald-400">✓ Bandit-verified:</span>
+              <span className="font-semibold text-emerald-400">
+                {verifiedCount}
+              </span>
+            </div>
+          )}
           {report.agents_that_failed.length > 0 && (
             <div className="flex items-center gap-2 text-sm">
               <span className="text-red-400">Failed:</span>

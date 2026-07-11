@@ -82,10 +82,16 @@ export default function DiscussionRoom({ analysisId, onComplete }: DiscussionRoo
     }
   }, [events]);
 
-  // Filter out keepalive and show meaningful events
-  const visibleEvents = events.filter(
-    (e) => e.event_type !== "keepalive" && e.event_type !== "done"
-  );
+  // Filter out non-message events. consensus_complete / analysis_complete carry
+  // report/terminal payloads (handled by the report tab + terminal logic above),
+  // not chat content — rendering them here would dump raw JSON into a bubble.
+  const HIDDEN_EVENTS = new Set([
+    "keepalive",
+    "done",
+    "consensus_complete",
+    "analysis_complete",
+  ]);
+  const visibleEvents = events.filter((e) => !HIDDEN_EVENTS.has(e.event_type));
 
   return (
     <div className="glass-card flex flex-col h-full" id="discussion-room">

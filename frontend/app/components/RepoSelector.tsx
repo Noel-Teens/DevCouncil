@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "../lib/api";
+import { useAuth } from "./AuthProvider";
 
 interface Repo {
   id: number;
@@ -16,24 +17,37 @@ interface Repo {
 
 export default function RepoSelector() {
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const { isAuthenticated, user, isLoading: authLoading } = useAuth();
+
+  // Only real GitHub accounts have repos to list — guests/logged-out users don't,
+  // so skip the fetch entirely (avoids a spinner flash and a needless 401).
+  const canListRepos = isAuthenticated && !!user && user.github_id !== "guest";
 
   useEffect(() => {
+    if (authLoading || !canListRepos) return;
+    let cancelled = false;
     async function fetchRepos() {
+      setLoading(true);
       try {
         const data = await api.getUserRepos();
-        setRepos(data);
+        if (!cancelled) setRepos(data);
       } catch (err) {
         console.error("Failed to fetch repos", err);
-        setError("Failed to load your repositories.");
+        if (!cancelled) setError("Failed to load your repositories.");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
     fetchRepos();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, canListRepos]);
+
+  if (!canListRepos) return null;
 
   const handleSelectRepo = async (repoUrl: string) => {
     try {

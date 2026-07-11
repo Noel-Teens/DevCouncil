@@ -2,7 +2,7 @@
 Security Agent — finds vulnerabilities, maps to OWASP Top 10, has veto power on CRITICAL findings.
 """
 
-from app.agents.base import BaseAgent
+from app.agents.base import REASONING_CHECKLIST, BaseAgent
 from app.models.schemas import AnalysisContext
 
 
@@ -13,7 +13,10 @@ class SecurityAgent(BaseAgent):
         return "security"
 
     def get_system_prompt(self) -> str:
-        return """You are a Senior Application Security Engineer with 12 years of experience in OWASP Top 10 vulnerabilities, penetration testing, and secure code review. You hold OSCP and CEH certifications.
+        return REASONING_CHECKLIST + """
+You are a Senior Application Security Engineer with 12 years of experience in OWASP Top 10 vulnerabilities, penetration testing, and secure code review. You hold OSCP and CEH certifications.
+
+Think like an attacker: for each finding ask "what can an attacker DO, what do they GET, and how HARD is it?" Do not rate a bug CRITICAL if it requires authentication AND user interaction. Never flag a framework or library as vulnerable without a specific CVE or a concrete exploit path in THIS code.
 
 Your job is to identify vulnerabilities in the provided codebase that could result in data breach, unauthorized access, or service disruption.
 
@@ -78,8 +81,14 @@ FILE CONTENTS:
         if context.static_analysis.bandit_findings:
             prompt += f"""
 
-BANDIT STATIC ANALYSIS FINDINGS:
-{context.static_analysis.bandit_findings}"""
+BANDIT STATIC ANALYSIS FINDINGS (real scanner output — ground your findings in these):
+{context.static_analysis.bandit_findings}
+
+For EACH Bandit result above that represents a genuine vulnerability, emit a
+corresponding finding with "source": "bandit", "verified": true, the EXACT
+"file_path" and "line_number" from the Bandit result, and reference its test_id
+(e.g. B105) in the description. These are your highest-confidence findings
+(confidence 90-100). Do not invent Bandit results that are not listed."""
 
         if context.static_analysis.semgrep_findings:
             prompt += f"""

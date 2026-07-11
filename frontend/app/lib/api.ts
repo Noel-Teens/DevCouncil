@@ -52,6 +52,13 @@ class ApiClient {
     });
   }
 
+  /** Replay a canned demo scenario (no auth, no Groq) — offline-safe. */
+  async createDemoAnalysis(scenario: string): Promise<AnalysisResponse> {
+    return this.request<AnalysisResponse>(`/api/analysis/demo/${scenario}`, {
+      method: "POST",
+    });
+  }
+
   async getAnalysis(analysisId: string): Promise<AnalysisResult> {
     return this.request<AnalysisResult>(`/api/analysis/${analysisId}`);
   }

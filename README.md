@@ -49,7 +49,7 @@ Current AI tools — Copilot, Cursor, ChatGPT — give you **one model's opinion
 
 ## What DevCouncil AI Does
 
-DevCouncil AI runs **seven specialized AI agents in parallel** against your GitHub repository. Each agent independently analyzes your code from its own domain. Then they **debate**.
+DevCouncil AI runs **three specialist AI agents plus a Consensus Director** against your GitHub repository. Each specialist independently analyzes your code from its own domain. Then they **debate**, and the Director arbitrates.
 
 ```
 You paste a GitHub URL.
@@ -68,11 +68,13 @@ Consensus Director ────────────────────�
 You get a report. The debate is transparent. The decision is explained.
 ```
 
-**This is what a real senior engineering team does. We built it for $0.05 per analysis.**
+**This is what a real senior engineering team does. We built it for under $0.05 per analysis.**
 
 ---
 
-## The Seven Agents
+## The Council
+
+Three specialists debate; the Director arbitrates. Each runs in its own context with its own system prompt, so they can genuinely disagree.
 
 <table>
 <tr>
@@ -82,22 +84,13 @@ You get a report. The debate is transparent. The decision is explained.
 System design authority. Owns scalability, design patterns, technology choices, and refactoring priorities. The only agent that can challenge a Security recommendation on proportionality grounds.
 
 **🔐 Security Agent**
-Vulnerability authority. Grounds every finding in Bandit/Semgrep static analysis output. Has **veto power** — CRITICAL findings cannot be removed from the final report by any other agent.
-
-**🔍 Code Reviewer Agent**
-Code quality authority. Provides line-level citations for every recommendation. Never gives generic advice — "fix line 47 in `payment.py`", not "improve error handling".
-
-**📋 Product Manager Agent**
-Requirements authority. Identifies gaps between what was specified and what was built. Flags TODO comments, missing CRUD operations, and incomplete user flows.
+Vulnerability authority. Grounds findings in **Bandit** static-analysis output (real scanner, Python) plus direct code review. Has **veto power** — CRITICAL findings cannot be removed from the final report by any other agent.
 
 </td>
 <td width="50%">
 
-**🧪 QA Tester Agent**
-Test coverage authority. Generates **executable test cases** in your project's testing framework — pytest or Jest — not descriptions of what to test.
-
-**📝 Documentation Agent**
-Documentation authority. Produces a real `README.md`, API reference, and onboarding guide from your code. Outputs usable files, not templates.
+**🔍 Code Reviewer Agent**
+Code quality authority. Provides line-level citations for every recommendation. Never gives generic advice — "fix line 47 in `payment.py`", not "improve error handling".
 
 **⚖️ Consensus Director Agent**
 Synthesis authority. Collects all findings, resolves conflicts using explicit priority rules, and explains every decision. Does not average disagreements — it arbitrates them.
@@ -105,6 +98,8 @@ Synthesis authority. Collects all findings, resolves conflicts using explicit pr
 </td>
 </tr>
 </table>
+
+**On the roadmap:** Product Manager (spec-vs-code gaps), QA Tester (executable test generation), and Documentation agents. The architecture is designed to add specialists without touching the orchestrator — these are the next three.
 
 ---
 
@@ -127,7 +122,7 @@ The highest-impact feature is watching it happen in real time.
 │  ─────────────────────────────────────────────────────────────  │
 │  Challenging architect_3. Decomposition introduces JWT          │
 │  inter-service auth — 4 new attack vectors not present in       │
-│  current stack. Semgrep rule jwt-none-algorithm confirmed       │
+│  current stack. Inter-service JWT auth confirmed as risk        │
 │  risk in: src/middleware/auth.py:18                             │
 │                                                                 │
 │  🏗️  Architect Agent  [confidence: 62%]              CONCEDE  ✓│
@@ -163,17 +158,18 @@ Every message streams in real time via Server-Sent Events. Every conflict is exp
 │                    (Render · Docker · Python 3.11)                  │
 │  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────────┐   │
 │  │  Ingestion  │  │ Static Anal. │  │    AI Orchestrator        │   │
-│  │  GitHub API │  │ Bandit       │  │    asyncio.gather         │   │
-│  │  File Tree  │  │ Semgrep      │  │    7 parallel agents      │   │
-│  │  Content    │  │ Tree-Sitter  │  │    Discussion Phase       │   │
+│  │  GitHub API │  │ Bandit       │  │  3 specialists (staggered │   │
+│  │  File Tree  │  │ (regex AST)  │  │  for free-tier TPM)       │   │
+│  │  Content    │  │              │  │  Debate → Consensus       │   │
 │  └─────────────┘  └──────────────┘  └───────────────────────────┘   │
 └───────────┬───────────────┬──────────────────────┬──────────────────┘
             │               │                      │
     ┌───────▼──────┐ ┌──────▼──────┐      ┌───────▼────────┐
-    │    Neon      │ │   Upstash   │      │   Groq API     │
-    │  PostgreSQL  │ │    Redis    │      │ Llama-3.3-70b  │
-    │  (6 tables)  │ │  (cache +   │      │ (7 agents run  │
-    │              │ │rate limits) │      │  in parallel)  │
+    │   SQLite     │ │   Upstash   │      │   Groq API     │
+    │ (Postgres-   │ │    Redis    │      │ Llama-3.3-70b  │
+    │   ready, 6   │ │ (optional;  │      │ (3 specialists │
+    │   tables)    │ │ in-mem      │      │  + director)   │
+    │              │ │ fallback)   │      │                │
     └──────────────┘ └─────────────┘      └────────────────┘
 ```
 
@@ -182,14 +178,14 @@ Every message streams in real time via Server-Sent Events. Every conflict is exp
 | Layer | Choice | Why |
 |---|---|---|
 | Frontend | Next.js 14 (App Router) | Native SSE streaming support; TypeScript for agent message type safety |
-| Backend | FastAPI + Python | Only language with mature Bandit + Tree-Sitter + Semgrep bindings |
-| LLM | Groq + Llama-3.3-70b | Fastest inference on free tier (~500 tok/s); full 7-agent analysis under $0.05 |
-| Orchestration | `asyncio.gather` | LangGraph adds 2-day learning curve; direct async is sufficient for MVP |
-| Database | Neon PostgreSQL | Serverless, free tier, standard SQL — no ORM complexity needed |
-| Cache | Upstash Redis | Agent response caching; session state; rate limiting (10K cmd/day free) |
-| Auth | GitHub OAuth + JWT | Single-click login for devs; `httponly` cookie prevents XSS token theft |
-| Static Analysis | Bandit + Semgrep | Grounds agent findings in real detections — prevents LLM hallucination |
-| AST | Tree-Sitter | File-path + line-number citations require structured code parsing |
+| Backend | FastAPI + Python | Native async for SSE streaming; mature static-analysis tooling (Bandit) |
+| LLM | Groq + Llama-3.3-70b | Fastest inference on free tier (~500 tok/s); full analysis under $0.05 |
+| Orchestration | `asyncio` (staggered) | Agents are staggered rather than fully parallel to respect Groq's free-tier TPM limit; direct async is sufficient for MVP |
+| Database | SQLite (Postgres-ready) | Zero-config local persistence via SQLAlchemy async; swap `DATABASE_URL` for Neon Postgres in production |
+| Cache | Upstash Redis (optional) | Response caching + rate limiting; falls back to in-memory when unset |
+| Auth | GitHub OAuth + JWT + guest | Single-click login for devs; guest mode for a zero-signup demo |
+| Static Analysis | Bandit | Grounds Security findings in real scanner detections (Python) — prevents LLM hallucination. Semgrep (multi-language) is on the roadmap |
+| AST | Regex extraction | Lightweight file-path + line-number citations. Tree-Sitter is on the roadmap |
 | Deploy | Vercel + Render | Both free tier; Render supports persistent processes for SSE streaming |
 
 ---
@@ -201,8 +197,9 @@ This is the engineering decision that separates DevCouncil AI from "ChatGPT with
 Every finding must be grounded in a concrete artifact:
 
 ```python
-# Security Agent cannot invent vulnerabilities.
-# It can ONLY cite what Bandit/Semgrep detected — or what it reads directly in file contents.
+# Security findings are grounded in Bandit static-analysis output.
+# A finding whose file+line matches a Bandit result is marked verified=true
+# by the orchestrator (deterministically — not on the LLM's say-so).
 
 class SecurityFinding(BaseModel):
     file_path: str        # required — no file path = no finding
@@ -225,9 +222,8 @@ The Consensus Director cross-references every finding against source artifacts b
 
 - Python 3.11+
 - Node.js 18+
-- Docker (for backend deployment)
-- Groq API key (free at [console.groq.com](https://console.groq.com))
-- GitHub OAuth app credentials
+- Groq API key (free at [console.groq.com](https://console.groq.com)) — required only for live analysis, not the demo
+- GitHub OAuth app credentials (optional — guest mode works without them)
 
 ### 1. Clone the Repository
 
@@ -241,35 +237,28 @@ cd devcouncil-ai
 ```bash
 cd backend
 
-# Install Python dependencies
+# Install Python dependencies (includes Bandit for static analysis)
 pip install -r requirements.txt
 
-# Install system dependencies for static analysis
-pip install bandit semgrep
-
-# Install Tree-Sitter language grammars
-python scripts/install_grammars.py
-
 # Configure environment variables
-cp .env.example .env
+cp .env.example .env.local
 ```
 
-Edit `.env`:
+Edit `.env.local` (only `GROQ_API_KEY` is required for live analysis — the
+demo scenarios run without it):
 ```env
-DATABASE_URL=postgresql://...           # Neon connection string
-REDIS_URL=redis://...                   # Upstash Redis URL
-GROQ_API_KEY=gsk_...                   # Groq API key
-GITHUB_CLIENT_ID=...                    # GitHub OAuth app
+GROQ_API_KEY=gsk_...                    # Groq API key (required for live runs)
+DATABASE_URL=sqlite+aiosqlite:///./devcouncil.db   # default; swap for Neon Postgres in prod
+JWT_SECRET=<a long random string>       # e.g. `python -c "import secrets;print(secrets.token_urlsafe(48))"`
+GITHUB_CLIENT_ID=...                    # optional — guest mode works without OAuth
 GITHUB_CLIENT_SECRET=...
-JWT_SECRET=your-secret-here
+GITHUB_TOKEN=...                        # optional PAT — raises GitHub ingestion rate limit
+UPSTASH_REDIS_URL=                      # optional — falls back to in-memory
 FRONTEND_URL=http://localhost:3000
 ```
 
 ```bash
-# Run database migrations
-alembic upgrade head
-
-# Start the backend
+# Tables are created automatically on startup (SQLAlchemy) — no migration step.
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -287,11 +276,8 @@ cp .env.local.example .env.local
 
 Edit `.env.local`:
 ```env
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=your-secret-here
-GITHUB_CLIENT_ID=...
-GITHUB_CLIENT_SECRET=...
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+NEXT_PUBLIC_GITHUB_CLIENT_ID=...        # optional — only needed for GitHub OAuth login
 ```
 
 ```bash
@@ -299,17 +285,17 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 npm run dev
 ```
 
-Visit `http://localhost:3000`. Paste any public GitHub URL. Watch the council convene.
+Visit `http://localhost:3000`. Paste any public GitHub URL — or click **Watch a demo** to see the council convene instantly with no signup.
 
-### 4. Docker (Recommended for Backend)
+### 4. Try the demo (no setup)
 
-```bash
-cd backend
-docker build -t devcouncil-backend .
-docker run -p 8000:8000 --env-file .env devcouncil-backend
-```
+With both servers running, open `http://localhost:3000` and click **The Disagreement**
+or **The Hardcoded Secret**. These replay a canned analysis through the live SSE
+stream — no Groq key, no GitHub token, guaranteed to work offline. Perfect for a
+reliable demo.
 
-The Dockerfile installs Bandit, Semgrep, and Tree-Sitter grammars automatically.
+> **Roadmap:** a Dockerfile and Neon Postgres deployment (Render) are planned but not
+> required for local development.
 
 ---
 
@@ -327,7 +313,7 @@ devcouncil-ai/
 │   │   │   └── reports.py           # Report history
 │   │   ├── services/
 │   │   │   ├── ingestion.py         # GitHub API client + file extraction
-│   │   │   ├── orchestrator.py      # asyncio.gather parallel agents
+│   │   │   ├── orchestrator.py      # staggered async agents + debate + consensus
 │   │   │   └── cache.py             # Caching service
 │   │   ├── agents/
 │   │   │   ├── base.py              # BaseAgent: call_llm, parse, retry
@@ -454,18 +440,19 @@ consensus_reports  → Final unified report (findings, action_plan, conflicts)
 
 ## Cost Architecture
 
-A full 7-agent analysis runs under $0.05:
+A full analysis runs under $0.05:
 
 | Component | Tokens | Cost |
 |---|---|---|
-| 6 specialist agents (parallel, Llama-3.3-70b) | ~12,000 | ~$0.006 |
+| 3 specialist agents (staggered, Llama-3.3-70b) | ~9,000 | ~$0.006 |
+| 3 rounds of structured debate | ~6,000 | ~$0.004 |
 | Consensus Director (synthesis) | ~8,000 | ~$0.032 |
-| Static analysis tooling (Bandit + Semgrep) | N/A | ~$0.004 |
-| **Total** | **~20,000** | **< $0.05** |
+| Bandit static analysis (local, no API) | N/A | $0.00 |
+| **Total** | **~23,000** | **< $0.05** |
 
 Free tier breakdown:
-- Groq: 14,400 requests/day → ~205 full analyses/day before rate limiting
-- Neon: 0.5GB → handles thousands of stored analyses
+- Groq: 14,400 requests/day → ~200 full analyses/day before rate limiting
+- SQLite (local) / Neon Postgres (prod): thousands of stored analyses
 - Upstash: 10,000 commands/day → ~50 commands per analysis
 
 ---
@@ -483,9 +470,9 @@ Compare these two outputs:
 | | ChatGPT (all roles, one prompt) | DevCouncil AI |
 |---|---|---|
 | Architecture recommendation | "Consider microservices for scalability" | "Modular monolith recommended — Security Agent vetoed microservices after identifying 4 new JWT attack vectors in the proposed inter-service auth layer" |
-| Security findings | "Validate your inputs" | "Hardcoded AWS key at config/settings.py:23 — confirmed by Bandit B105 + Semgrep hardcoded-credentials. Rotate immediately." |
+| Security findings | "Validate your inputs" | "Hardcoded AWS key at config/settings.py:23 — confirmed by Bandit B105, marked verified. Rotate immediately." |
 | Self-disagreement | Not possible | Architect and Security agents explicitly challenged each other in round 2 of discussion |
-| Hallucination guard | None | Security Agent can only cite Bandit/Semgrep detections. No scanner hit = no finding. |
+| Hallucination guard | None | Security findings are cross-checked against Bandit output and marked verified when they match. |
 | Source citations | Rarely, and often wrong | Every finding requires file path. Line number required for code-level claims. |
 
 The disagreement is not a UX feature. It is an architectural property. Separate agent contexts, separate system prompts, separate static analysis inputs — that is what produces findings that a single context window cannot.

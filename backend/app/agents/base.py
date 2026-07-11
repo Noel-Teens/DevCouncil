@@ -16,6 +16,24 @@ from app.models.schemas import AgentOutput, AnalysisContext, Finding
 logger = logging.getLogger(__name__)
 
 
+# Shared reasoning discipline applied by every specialist agent (from docs/FIXES.md).
+# Forces root-cause thinking and a concrete consequence chain instead of the
+# pattern-matched "best practice" output a single generic LLM would produce.
+REASONING_CHECKLIST = """
+REASONING CHECKLIST — run this for every finding BEFORE you emit it:
+1. ROOT CAUSE: name the underlying cause, not the symptom. If you can only
+   describe the symptom, you do not understand it well enough to report it.
+2. CONSEQUENCE CHAIN: state what breaks and when, in <=2 sentences
+   ("X causes Y when Z happens"). If you cannot, set confidence < 60 and drop it.
+3. DOMAIN CHECK: emit ONLY findings in your domain. If it belongs to another
+   specialist, do not report it — they will.
+4. DEDUPE: one root cause = one finding. Do not split the same issue across
+   multiple findings.
+5. SPECIFICITY: a developer must be able to fix it from your finding alone —
+   exact file, and a line or function name. No generic advice.
+"""
+
+
 class BaseAgent(ABC):
     """Base class for all DevCouncil AI agents."""
 

@@ -20,10 +20,12 @@ from app.models.schemas import (
     ConsensusReport,
     EventType,
 )
-from app.services.cache import cache_get_json, cache_set_json
+from app.services.cache import cache_get_json, cache_set_json, check_rate_limit
+from app.services.demo_runner import list_scenarios, load_scenario, run_demo_replay
 from app.services.orchestrator import (
     get_analysis_result,
     get_event_queue,
+    load_analysis_from_db,
     run_analysis_pipeline,
 )
 from app.routers.auth import require_auth
@@ -51,6 +53,13 @@ async def create_analysis(
             detail="Invalid repository URL. Please provide a valid GitHub URL (e.g., https://github.com/owner/repo)",
         )
 
+    # Per-user daily rate limit (no-op unless Redis is configured)
+    if not await check_rate_limit(user.get("sub", "anon"), max_per_day=20):
+        raise HTTPException(
+            status_code=429,
+            detail="Daily analysis limit reached. Please try again tomorrow.",
+        )
+
     # Check cache
     cached = await cache_get_json(f"analysis:{repo_url}")
     if cached:
@@ -70,12 +79,49 @@ async def create_analysis(
     }
 
     # Start pipeline in background
-    background_tasks.add_task(run_analysis_pipeline, analysis_id, repo_url)
+    background_tasks.add_task(
+        run_analysis_pipeline, analysis_id, repo_url, user.get("sub")
+    )
 
     return AnalysisResponse(
         analysis_id=analysis_id,
         status=AnalysisStatus.PENDING,
         repo_url=repo_url,
+    )
+
+
+@router.get("/demo/scenarios")
+async def get_demo_scenarios():
+    """List available canned demo scenarios (no auth — used on the landing page)."""
+    return {"scenarios": list_scenarios()}
+
+
+@router.post("/demo/{scenario}", response_model=AnalysisResponse)
+async def create_demo_analysis(scenario: str, background_tasks: BackgroundTasks):
+    """Replay a canned scenario through the live SSE path. No auth, no Groq.
+
+    Guaranteed, offline-safe demo — cannot rate-limit, time out, or hallucinate.
+    """
+    data = load_scenario(scenario)
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown demo scenario '{scenario}'. Available: {', '.join(list_scenarios())}",
+        )
+
+    analysis_id = str(uuid4())
+    _active_analyses[analysis_id] = {
+        "status": AnalysisStatus.PENDING,
+        "repo_url": data.get("repo_url", ""),
+        "is_demo": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    background_tasks.add_task(run_demo_replay, analysis_id, data)
+
+    return AnalysisResponse(
+        analysis_id=analysis_id,
+        status=AnalysisStatus.PENDING,
+        repo_url=data.get("repo_url", ""),
     )
 
 
@@ -128,6 +174,11 @@ async def get_analysis(analysis_id: str):
     result = get_analysis_result(analysis_id)
     if result:
         return result
+
+    # Read-through to the database (survives restarts / free-tier sleep)
+    db_result = await load_analysis_from_db(analysis_id)
+    if db_result:
+        return db_result
 
     # Check active analyses
     if analysis_id in _active_analyses:

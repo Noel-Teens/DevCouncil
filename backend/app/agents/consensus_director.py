@@ -89,41 +89,76 @@ No preamble, no explanation outside the JSON."""
         discussion_turns: list[DiscussionTurn],
         failed_agents: list[str],
     ) -> str:
-        """Build the user prompt specifically for consensus synthesis."""
-        sections = []
+        """Build the user prompt for consensus synthesis.
 
-        # Agent outputs
+        Per docs/FIXES.md, the Director must receive STRUCTURED, TRIMMED input —
+        compact findings + summaries + pre-computed contested/conceded ID lists —
+        not a raw dump of every agent's full output (which overflows context and
+        yields a concatenation instead of a synthesis).
+        """
+        # Pre-compute which findings were contested vs conceded during the debate.
+        contested_ids: set[str] = set()
+        conceded_ids: set[str] = set()
+        for t in discussion_turns:
+            if not t.target_finding_id:
+                continue
+            if t.turn_type in ("challenge", "escalate"):
+                contested_ids.add(t.target_finding_id)
+            elif t.turn_type == "concede":
+                conceded_ids.add(t.target_finding_id)
+
+        # Drop noise if the finding set is large — keep the signal under budget.
+        total_findings = sum(len(o.findings) for o in agent_outputs)
+        drop_low = total_findings > 25
+
+        sections = []
         for output in agent_outputs:
-            findings_text = json.dumps(
-                [f.model_dump() for f in output.findings], indent=2
-            )
+            lines = []
+            for f in output.findings:
+                sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
+                if drop_low and sev in ("LOW", "INFO"):
+                    continue
+                loc = f.file_path + (f":{f.line_number}" if f.line_number else "")
+                verified = " VERIFIED(bandit)" if f.verified else ""
+                veto = " VETO" if f.veto_active else ""
+                lines.append(
+                    f"  [{f.id}] {sev} {f.category} @ {loc} "
+                    f"(conf {f.confidence}%{verified}{veto}): {f.description}"
+                )
             sections.append(
-                f"--- {output.agent_name.upper()} AGENT OUTPUT ---\n"
-                f"Status: {output.status}\n"
+                f"--- {output.agent_name.upper()} ({output.status}) ---\n"
                 f"Summary: {output.summary}\n"
                 f"Top Priority: {output.top_priority}\n"
-                f"Findings:\n{findings_text}\n"
-                f"--- END ---"
+                + ("\n".join(lines) if lines else "  (no findings retained)")
             )
 
-        # Discussion turns
+        # Compact debate transcript.
         if discussion_turns:
             discussion_text = "\n".join(
-                f"  Round {t.round_number} | {t.agent_name} | {t.turn_type} "
-                f"{'→ ' + t.target_agent if t.target_agent else ''}: {t.message}"
+                f"  R{t.round_number} {t.agent_name} {t.turn_type}"
+                f"{' -> ' + t.target_agent + '/' + (t.target_finding_id or '?') if t.target_agent else ''}: "
+                f"{t.message[:280]}"
                 for t in discussion_turns
             )
-            sections.append(
-                f"--- DISCUSSION LOG ---\n{discussion_text}\n--- END DISCUSSION ---"
-            )
+            sections.append(f"--- DEBATE TRANSCRIPT ---\n{discussion_text}")
 
-        # Failed agents
+        sections.append(
+            "CONTESTED finding IDs (challenged/escalated): "
+            + (", ".join(sorted(contested_ids)) or "none")
+        )
+        sections.append(
+            "CONCEDED finding IDs (withdrawn by their author): "
+            + (", ".join(sorted(conceded_ids)) or "none")
+        )
         if failed_agents:
             sections.append(f"FAILED AGENTS: {', '.join(failed_agents)}")
 
         return (
-            "Synthesize the following agent outputs into a unified consensus report.\n"
-            "Resolve all conflicts. Deduplicate findings. Generate the action plan.\n\n"
+            "Synthesize these agent outputs into ONE unified consensus report.\n"
+            "Deduplicate by root cause. Apply the conflict-resolution rules in order.\n"
+            "Lock Security CRITICAL/veto findings. For CONCEDED findings, adopt the "
+            "conceding position. For CONTESTED findings, resolve them explicitly in "
+            "conflicts_resolved. Write the executive summary LAST.\n\n"
             + "\n\n".join(sections)
         )
 

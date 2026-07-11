@@ -94,6 +94,7 @@ class StaticAnalysisOutput(BaseModel):
 class AnalysisContext(BaseModel):
     repo_url: str
     repo_name: str
+    commit_sha: str | None = None
     primary_language: str = "unknown"
     file_tree: list[FileEntry] = Field(default_factory=list)
     file_contents: list[FileContent] = Field(default_factory=list)

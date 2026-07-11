@@ -30,6 +30,8 @@ from app.models.schemas import (
     Finding,
     TurnType,
 )
+from app.models.db import async_session
+from app.services.cache import cache_set_json
 from app.services.ingestion import ingest_repository
 
 logger = logging.getLogger(__name__)
@@ -194,6 +196,43 @@ VAGUE_PHRASES = [
 ]
 
 
+def ground_findings_with_bandit(
+    findings: list[Finding], bandit_findings: list[dict]
+) -> int:
+    """Mark findings that match real Bandit output as verified.
+
+    Truth comes from the scanner, not the LLM's self-reported ``verified`` flag.
+    A finding is grounded when its file (exact or suffix match) and line number
+    (within ±3 lines to tolerate the LLM's off-by-a-little citations) coincide
+    with a Bandit result. Returns the number of findings grounded.
+    """
+    if not bandit_findings:
+        return 0
+
+    grounded = 0
+    for f in findings:
+        f_path = (f.file_path or "").replace("\\", "/")
+        for b in bandit_findings:
+            b_path = (b.get("file_path") or "").replace("\\", "/")
+            path_match = bool(f_path) and (
+                f_path == b_path
+                or f_path.endswith(b_path)
+                or b_path.endswith(f_path)
+            )
+            if not path_match:
+                continue
+            b_line = b.get("line_number")
+            if f.line_number is not None and b_line is not None:
+                if abs(f.line_number - b_line) > 3:
+                    continue
+            # Grounded — anchor it to the scanner.
+            f.verified = True
+            f.source = "bandit"
+            grounded += 1
+            break
+    return grounded
+
+
 def filter_finding(finding: Finding, agent_name: str) -> bool:
     """Return True if finding passes all quality gates, False to suppress."""
     severity = finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity)
@@ -256,8 +295,15 @@ def filter_finding(finding: Finding, agent_name: str) -> bool:
 # Pipeline
 # ─────────────────────────────────────────────────────────
 
-async def run_analysis_pipeline(analysis_id: str, repo_url: str, db_session=None):
-    """Full analysis pipeline: ingest → validate → analyze → debate → consensus."""
+async def run_analysis_pipeline(
+    analysis_id: str, repo_url: str, user_id: str | None = None
+):
+    """Full analysis pipeline: ingest → validate → analyze → debate → consensus.
+
+    Owns its own DB session (this runs as a background task, after the request
+    session has closed) so every run is persisted and survives a restart.
+    """
+    await _create_analysis_row(analysis_id, repo_url, user_id)
     try:
         # ── Phase 0: Ingestion ──
         await emit_event(analysis_id, AgentEvent(
@@ -288,15 +334,22 @@ async def run_analysis_pipeline(analysis_id: str, repo_url: str, db_session=None
                 "repo_url": repo_url,
                 "error": str(e),
             }
+            await _mark_analysis_failed(analysis_id, str(e))
             return
 
+        bandit_count = len(context.static_analysis.bandit_findings)
+        ingest_msg = f"Ingested {len(context.file_tree)} files."
+        if bandit_count:
+            ingest_msg += f" Bandit flagged {bandit_count} potential issue(s) to ground Security findings."
+        ingest_msg += " Starting agent analysis..."
         await emit_event(analysis_id, AgentEvent(
             event_type=EventType.STATUS_UPDATE,
             data={
                 "status": AnalysisStatus.ANALYZING,
-                "message": f"Ingested {len(context.file_tree)} files. Starting agent analysis...",
+                "message": ingest_msg,
                 "file_count": len(context.file_tree),
                 "primary_language": context.primary_language,
+                "bandit_findings": bandit_count,
             },
         ))
 
@@ -332,23 +385,36 @@ async def run_analysis_pipeline(analysis_id: str, repo_url: str, db_session=None
             analysis_id, agent_outputs, discussion_turns, failed_agents
         )
 
+        # Rough cost estimate (Groq Llama-3.3-70b free tier): ~$0.002 per
+        # specialist call + ~$0.03 for the consensus synthesis pass.
+        cost_usd = round(len(agent_outputs) * 0.002 + 0.03, 4)
+
         # Store result
         _analysis_results[analysis_id] = {
             "status": AnalysisStatus.COMPLETE,
             "repo_url": repo_url,
             "repo_name": context.repo_name,
+            "cost_usd": cost_usd,
             "agent_outputs": [o.model_dump() for o in agent_outputs],
             "discussion_turns": [t.model_dump() for t in discussion_turns],
             "consensus_report": consensus.model_dump(),
             "completed_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Save to database if session provided
-        if db_session:
+        # Persist to the database (own session — survives restarts)
+        async with async_session() as session:
             await _save_to_db(
-                db_session, analysis_id, agent_outputs,
-                discussion_turns, consensus
+                session, analysis_id, agent_outputs,
+                discussion_turns, consensus,
+                repo_name=context.repo_name,
+                commit_sha=context.commit_sha,
+                cost_usd=cost_usd,
             )
+
+        # Populate the response cache so a repeat submit returns instantly
+        await cache_set_json(
+            f"analysis:{repo_url}", {"analysis_id": analysis_id}, ttl_seconds=86400
+        )
 
         await emit_event(analysis_id, AgentEvent(
             event_type=EventType.CONSENSUS_COMPLETE,
@@ -370,6 +436,7 @@ async def run_analysis_pipeline(analysis_id: str, repo_url: str, db_session=None
             "repo_url": repo_url,
             "error": str(e),
         }
+        await _mark_analysis_failed(analysis_id, str(e))
         await emit_event(analysis_id, AgentEvent(
             event_type=EventType.ANALYSIS_FAILED,
             data={"message": f"Analysis failed: {str(e)}"},
@@ -431,10 +498,19 @@ async def _run_parallel_analysis(
                 data={"message": result.summary},
             ))
         else:
-            # Fix 3 — Apply finding quality filter
+            # Ground Security findings in real Bandit output before filtering,
+            # so scanner-confirmed findings are marked verified and never dropped.
+            if agent.agent_name == "security":
+                grounded = ground_findings_with_bandit(
+                    result.findings, context.static_analysis.bandit_findings
+                )
+                if grounded:
+                    logger.info(f"[security] Grounded {grounded} finding(s) in Bandit output")
+
+            # Fix 3 — Apply finding quality filter (verified findings bypass it)
             filtered_findings = [
                 f for f in result.findings
-                if filter_finding(f, agent.agent_name)
+                if f.verified or filter_finding(f, agent.agent_name)
             ]
             suppressed = len(result.findings) - len(filtered_findings)
             if suppressed > 0:
@@ -563,7 +639,54 @@ async def _run_consensus(
     return await director.synthesize(agent_outputs, discussion_turns, failed_agents)
 
 
-async def _save_to_db(db_session, analysis_id, agent_outputs, discussion_turns, consensus):
+async def _create_analysis_row(analysis_id: str, repo_url: str, user_id: str | None):
+    """Insert the Analysis row at pipeline start so status/history is tracked."""
+    from app.models.db import Analysis
+
+    # A guest JWT has sub="guest", which is not a real users row — store NULL
+    # rather than risk a dangling FK reference.
+    real_user_id = user_id if user_id and user_id != "guest" else None
+    try:
+        async with async_session() as session:
+            session.add(Analysis(
+                id=analysis_id,
+                user_id=real_user_id,
+                repo_url=repo_url,
+                status="pending",
+                started_at=datetime.now(timezone.utc),
+            ))
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"[{analysis_id}] Could not create analysis row: {e}")
+
+
+async def _mark_analysis_failed(analysis_id: str, error: str):
+    """Best-effort update of the Analysis row to a failed state."""
+    from app.models.db import Analysis
+    from sqlalchemy import update
+
+    try:
+        async with async_session() as session:
+            await session.execute(
+                update(Analysis)
+                .where(Analysis.id == analysis_id)
+                .values(status="failed", completed_at=datetime.now(timezone.utc))
+            )
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"[{analysis_id}] Could not mark analysis failed: {e}")
+
+
+async def _save_to_db(
+    db_session,
+    analysis_id,
+    agent_outputs,
+    discussion_turns,
+    consensus,
+    repo_name: str | None = None,
+    commit_sha: str | None = None,
+    cost_usd: float | None = None,
+):
     """Save analysis results to the database."""
     from app.models.db import (
         AgentOutputRecord,
@@ -574,12 +697,15 @@ async def _save_to_db(db_session, analysis_id, agent_outputs, discussion_turns, 
     from sqlalchemy import update
 
     try:
-        # Update analysis status
+        # Update analysis status + metadata
         await db_session.execute(
             update(Analysis)
             .where(Analysis.id == analysis_id)
             .values(
                 status="complete",
+                repo_name=repo_name,
+                commit_sha=commit_sha,
+                cost_usd=cost_usd,
                 completed_at=datetime.now(timezone.utc),
             )
         )
@@ -627,3 +753,90 @@ async def _save_to_db(db_session, analysis_id, agent_outputs, discussion_turns, 
     except Exception as e:
         logger.error(f"[{analysis_id}] Failed to save to DB: {e}")
         await db_session.rollback()
+
+
+async def load_analysis_from_db(analysis_id: str) -> dict | None:
+    """Read-through fallback: reconstruct a completed analysis from the DB.
+
+    Lets results survive a backend restart / free-tier sleep even after the
+    in-memory ``_analysis_results`` cache is gone.
+    """
+    from app.models.db import (
+        AgentOutputRecord,
+        Analysis,
+        ConsensusReportRecord,
+        DiscussionTurnRecord,
+    )
+    from sqlalchemy import select
+
+    try:
+        async with async_session() as session:
+            analysis = (
+                await session.execute(select(Analysis).where(Analysis.id == analysis_id))
+            ).scalar_one_or_none()
+            if analysis is None:
+                return None
+
+            result: dict = {
+                "status": analysis.status,
+                "repo_url": analysis.repo_url,
+                "repo_name": analysis.repo_name,
+                "cost_usd": analysis.cost_usd,
+                "completed_at": analysis.completed_at.isoformat() if analysis.completed_at else None,
+            }
+
+            outputs = (
+                await session.execute(
+                    select(AgentOutputRecord).where(AgentOutputRecord.analysis_id == analysis_id)
+                )
+            ).scalars().all()
+            result["agent_outputs"] = [
+                {
+                    "agent_name": o.agent_name,
+                    "status": o.status,
+                    "findings": o.findings or [],
+                    "summary": o.summary or "",
+                    "top_priority": "",
+                }
+                for o in outputs
+            ]
+
+            turns = (
+                await session.execute(
+                    select(DiscussionTurnRecord).where(DiscussionTurnRecord.analysis_id == analysis_id)
+                )
+            ).scalars().all()
+            result["discussion_turns"] = [
+                {
+                    "round_number": t.round_number,
+                    "agent_name": t.agent_name,
+                    "turn_type": t.turn_type,
+                    "target_agent": t.target_agent,
+                    "target_finding_id": t.target_finding_id,
+                    "message": t.message,
+                    "confidence": t.confidence,
+                }
+                for t in turns
+            ]
+
+            report = (
+                await session.execute(
+                    select(ConsensusReportRecord).where(
+                        ConsensusReportRecord.analysis_id == analysis_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if report is not None:
+                result["consensus_report"] = {
+                    "executive_summary": report.executive_summary or "",
+                    "findings": report.findings or [],
+                    "action_plan": report.action_plan or [],
+                    "conflicts_resolved": report.conflicts_resolved or [],
+                    "agents_that_participated": report.agents_participated or [],
+                    "agents_that_failed": report.agents_failed or [],
+                }
+
+            return result
+    except Exception as e:
+        logger.warning(f"[{analysis_id}] Could not load analysis from DB: {e}")
+        return None

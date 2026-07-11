@@ -1,5 +1,6 @@
 import RepoInput from "./components/RepoInput";
 import RepoSelector from "./components/RepoSelector";
+import DemoButtons from "./components/DemoButtons";
 import Navbar from "./components/Navbar";
 
 const FEATURES = [
@@ -98,6 +99,8 @@ export default function Home() {
             >
               <RepoInput />
             </div>
+
+            <DemoButtons />
 
             <RepoSelector />
 

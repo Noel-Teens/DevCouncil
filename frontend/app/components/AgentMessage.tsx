@@ -184,9 +184,27 @@ export default function AgentMessage({ event, index = 0 }: AgentMessageProps) {
       messageContent = data.message as string || "Synthesizing final report...";
       messageStyle = "info";
       break;
+    case "consensus_complete":
+      messageContent = "⚖️ Consensus reached — see the Consensus Report tab.";
+      messageStyle = "success";
+      break;
+    case "analysis_complete":
+      messageContent = data.message as string || "Analysis complete.";
+      messageStyle = "success";
+      break;
+    case "analysis_failed":
+      messageContent = data.message as string || "Analysis failed.";
+      messageStyle = "error";
+      break;
     default:
-      messageContent = data.message as string || JSON.stringify(data);
+      // Never dump a raw object into a chat bubble.
+      messageContent = typeof data.message === "string" ? data.message : "";
       messageStyle = "info";
+  }
+
+  // Nothing meaningful to show (e.g. an unexpected structured event) — skip it.
+  if (!messageContent) {
+    return null;
   }
 
   const borderColorMap: Record<string, string> = {

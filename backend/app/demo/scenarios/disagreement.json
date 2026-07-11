@@ -1,0 +1,160 @@
+{
+  "repo_url": "https://github.com/acme/orders-monolith",
+  "repo_name": "acme/orders-monolith",
+  "primary_language": "Python",
+  "file_count": 31,
+  "cost_usd": 0.043,
+  "bandit_findings": 1,
+  "agent_outputs": [
+    {
+      "agent_name": "architect",
+      "status": "complete",
+      "summary": "UserService and OrderService share a single module with a clear domain seam. At scale this coupling will slow independent deploys; a service split is worth considering.",
+      "top_priority": "Decompose UserService along the domain boundary visible at src/services/users.py:234.",
+      "findings": [
+        {
+          "id": "architect_1",
+          "severity": "HIGH",
+          "category": "Architecture Pattern",
+          "file_path": "src/services/users.py",
+          "line_number": 234,
+          "description": "UserService and OrderService are entangled in one module. There is a clean domain boundary at src/services/users.py:234. Recommend decomposing into two microservices so each team can deploy independently and scale hot paths separately.",
+          "recommendation": "Extract OrderService into its own deployable service communicating over an internal API, with UserService as a separate bounded context.",
+          "confidence": 78,
+          "source": "llm_inferred",
+          "verified": false,
+          "veto_active": false
+        }
+      ]
+    },
+    {
+      "agent_name": "security",
+      "status": "complete",
+      "summary": "Current auth is a single in-process check. The proposed microservice split would introduce inter-service auth and materially expand the attack surface.",
+      "top_priority": "Do not split into services at this scale without an inter-service auth design — it adds four new attack classes.",
+      "findings": [
+        {
+          "id": "security_1",
+          "severity": "MEDIUM",
+          "category": "Broken Auth",
+          "file_path": "src/middleware/auth.py",
+          "line_number": 18,
+          "description": "Auth is a single in-process middleware check at src/middleware/auth.py:18. Adequate for a monolith. Splitting into services would replace this with JWT passed between services, introducing token forgery, replay, key-distribution, and man-in-the-middle risks that do not exist today.",
+          "recommendation": "Keep the in-process check. If a split is ever required, design mTLS or a signed service-to-service token scheme first.",
+          "confidence": 91,
+          "source": "llm_inferred",
+          "verified": false,
+          "veto_active": false
+        }
+      ]
+    },
+    {
+      "agent_name": "code_reviewer",
+      "status": "complete",
+      "summary": "The coupling the Architect flagged is real but shallow — a single shared helper, not deep entanglement.",
+      "top_priority": "Extract the shared helper into a module boundary before considering any service split.",
+      "findings": [
+        {
+          "id": "code_reviewer_1",
+          "severity": "MEDIUM",
+          "category": "Code Smell",
+          "file_path": "src/services/users.py",
+          "line_number": 240,
+          "description": "The coupling between UserService and OrderService is a single shared function _resolve_account() at src/services/users.py:240. This is a module-level smell, not architecture-level entanglement — it can be broken with an extraction, no new services required.",
+          "recommendation": "Move _resolve_account() into a shared accounts module and have both services import it. Reassess boundaries after that.",
+          "confidence": 82,
+          "source": "llm_inferred",
+          "verified": false,
+          "veto_active": false
+        }
+      ]
+    }
+  ],
+  "discussion_turns": [
+    {
+      "round_number": 1,
+      "agent_name": "security",
+      "turn_type": "challenge",
+      "target_agent": "architect",
+      "target_finding_id": "architect_1",
+      "message": "CHALLENGE architect_1: decomposition introduces JWT inter-service auth — four new attack vectors (token forgery, replay, key distribution, MITM) that do not exist in the current in-process model at src/middleware/auth.py:18. At under 1,000 users the scaling benefit does not justify tripling the auth attack surface.",
+      "confidence": 91
+    },
+    {
+      "round_number": 1,
+      "agent_name": "code_reviewer",
+      "turn_type": "challenge",
+      "target_agent": "architect",
+      "target_finding_id": "architect_1",
+      "message": "CHALLENGE architect_1: the coupling is one shared function, _resolve_account() at src/services/users.py:240 — not deep entanglement. A module extraction achieves the separation you want without standing up new services or the operational overhead that implies.",
+      "confidence": 82
+    },
+    {
+      "round_number": 2,
+      "agent_name": "architect",
+      "turn_type": "concede",
+      "target_agent": "security",
+      "target_finding_id": "security_1",
+      "message": "CONCEDING security_1: the security cost is valid at current scale, and code_reviewer_1 is right that the coupling is shallow. Withdrawing the microservices recommendation. A modular monolith with an extracted accounts module gives the domain boundary without the new attack surface. Revisit services past ~50k users.",
+      "confidence": 84
+    }
+  ],
+  "consensus_report": {
+    "executive_summary": "The Architect proposed splitting this application into microservices for cleaner boundaries. The Security Engineer pushed back: at this scale the split would add four new authentication attack vectors for little real benefit, and the Code Reviewer showed the coupling is a single shared function, not deep entanglement. The team converged on a modular monolith — extract the shared code into its own module now, and reconsider services only when traffic justifies it. This is exactly the cross-domain trade-off a single AI reviewer cannot make, because it requires one specialist to overrule another.",
+    "findings": [
+      {
+        "id": "consensus_1",
+        "severity": "MEDIUM",
+        "category": "Architecture Pattern",
+        "file_path": "src/services/users.py",
+        "line_number": 240,
+        "description": "Adopt a modular monolith: extract the shared _resolve_account() helper into an accounts module to create the domain boundary, without splitting into separately deployed services. Supersedes the original microservices proposal (architect_1) after Security and Code Reviewer challenges.",
+        "recommendation": "Extract src/services/users.py:240 into a shared accounts module imported by both UserService and OrderService. Do not introduce inter-service auth at current scale.",
+        "confidence": 86,
+        "source": "consensus",
+        "verified": false,
+        "veto_active": false
+      },
+      {
+        "id": "security_1",
+        "severity": "MEDIUM",
+        "category": "Broken Auth",
+        "file_path": "src/middleware/auth.py",
+        "line_number": 18,
+        "description": "Keep the in-process auth check; a service split would expand the attack surface with JWT inter-service auth.",
+        "recommendation": "Retain in-process auth; design mTLS/signed tokens before any future split.",
+        "confidence": 91,
+        "source": "llm_inferred",
+        "verified": false,
+        "veto_active": false
+      }
+    ],
+    "action_plan": [
+      {
+        "priority": 1,
+        "finding_ids": ["consensus_1", "code_reviewer_1"],
+        "title": "Extract _resolve_account() into a shared accounts module (modular monolith)",
+        "effort": "< 1 day",
+        "assignable_to": "any developer"
+      },
+      {
+        "priority": 2,
+        "finding_ids": ["security_1"],
+        "title": "Document the decision to keep in-process auth until scale requires services",
+        "effort": "< 1 hour",
+        "assignable_to": "senior engineer"
+      }
+    ],
+    "conflicts_resolved": [
+      {
+        "agent_a": "architect",
+        "agent_b": "security",
+        "finding_ids": ["architect_1", "security_1"],
+        "winner": "security",
+        "reason": "The Architect recommended microservices (confidence 78%). The Security Engineer challenged at 91% confidence that a split introduces four new JWT-based attack vectors absent from the current in-process model, disproportionate to the benefit at under 1,000 users. The Code Reviewer independently showed the coupling was a single shared function, not deep entanglement. The Architect conceded in round 2 and withdrew the recommendation. Resolution: modular monolith — the domain boundary is achieved by a module extraction, and services are revisited only past ~50k users."
+      }
+    ],
+    "agents_that_participated": ["architect", "security", "code_reviewer"],
+    "agents_that_failed": []
+  }
+}
