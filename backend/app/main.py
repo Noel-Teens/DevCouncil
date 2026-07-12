@@ -40,13 +40,22 @@ app = FastAPI(
 
 # CORS
 settings = get_settings()
+
+# Explicit origins (FRONTEND_URL + local dev) plus any extra comma-separated
+# origins from the CORS_ORIGINS env var.
+_allowed_origins = [
+    settings.frontend_url,
+    "http://localhost:3000",
+    "http://localhost:3001",
+]
+_extra = [o.strip() for o in getattr(settings, "cors_origins", "").split(",") if o.strip()]
+_allowed_origins = list(dict.fromkeys(_allowed_origins + _extra))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        settings.frontend_url,
-        "http://localhost:3000",
-        "http://localhost:3001",
-    ],
+    allow_origins=_allowed_origins,
+    # Allow any Netlify/Vercel deploy (branch builds + previews change the subdomain).
+    allow_origin_regex=r"https://([a-z0-9-]+\.)*(netlify\.app|vercel\.app)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

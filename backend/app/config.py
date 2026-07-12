@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # App
     frontend_url: str = "http://localhost:3000"
     backend_url: str = "http://localhost:8000"
+    # Optional comma-separated list of extra allowed CORS origins
+    cors_origins: str = ""
     max_repo_size_mb: int = 50
     max_file_size_kb: int = 200
     agent_timeout_seconds: int = 30
