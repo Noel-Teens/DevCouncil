@@ -33,7 +33,7 @@ class User(Base):
     github_token = Column(String(255), nullable=True)
     email = Column(String(255), nullable=True)
     username = Column(String(100), nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     analyses = relationship("Analysis", back_populates="user")
 
@@ -45,7 +45,7 @@ class Project(Base):
     repo_url = Column(String(500), unique=True, nullable=False)
     repo_name = Column(String(200), nullable=True)
     primary_language = Column(String(50), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     analyses = relationship("Analysis", back_populates="project")
 
@@ -60,10 +60,10 @@ class Analysis(Base):
     repo_url = Column(String(500), nullable=False)
     repo_name = Column(String(200), nullable=True)
     commit_sha = Column(String(40), nullable=True)
-    started_at = Column(DateTime, nullable=True)
-    completed_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     cost_usd = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     project = relationship("Project", back_populates="analyses")
     user = relationship("User", back_populates="analyses")
@@ -85,7 +85,7 @@ class AgentOutputRecord(Base):
     findings = Column(JSON, nullable=True)
     summary = Column(Text, nullable=True)
     duration_ms = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     analysis = relationship("Analysis", back_populates="agent_outputs")
 
@@ -102,7 +102,7 @@ class DiscussionTurnRecord(Base):
     target_finding_id = Column(String(100), nullable=True)
     message = Column(Text, nullable=False)
     confidence = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     analysis = relationship("Analysis", back_populates="discussion_turns")
 
@@ -118,7 +118,7 @@ class ConsensusReportRecord(Base):
     conflicts_resolved = Column(JSON, nullable=True)
     agents_participated = Column(JSON, nullable=True)
     agents_failed = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     analysis = relationship("Analysis", back_populates="consensus_report")
 
