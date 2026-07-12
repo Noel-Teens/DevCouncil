@@ -1,5 +1,5 @@
 import type { Finding } from "../lib/types";
-import { AGENT_INFO } from "../lib/types";
+import { AgentBadge, agentMeta } from "../lib/agents";
 import SeverityBadge from "./SeverityBadge";
 
 interface FindingCardProps {
@@ -8,11 +8,7 @@ interface FindingCardProps {
 }
 
 export default function FindingCard({ finding, index = 0 }: FindingCardProps) {
-  const agentInfo = AGENT_INFO[finding.source] || {
-    icon: "📋",
-    color: "#8b5cf6",
-    title: finding.source,
-  };
+  const meta = agentMeta(finding.source);
 
   return (
     <div
@@ -24,13 +20,13 @@ export default function FindingCard({ finding, index = 0 }: FindingCardProps) {
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-2.5">
           <SeverityBadge severity={finding.severity} />
-          <span className="text-xs font-medium text-[var(--text-muted)] bg-[var(--surface)] px-2 py-0.5 rounded-full">
+          <span className="mono text-[11px] text-[var(--text-muted)] border border-[var(--border)] px-2 py-0.5 rounded">
             {finding.category}
           </span>
         </div>
         {finding.veto_active && (
-          <span className="text-xs font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded-full border border-red-400/20">
-            🔒 VETO
+          <span className="mono text-[10px] font-semibold text-[#ff6a6a] bg-[rgba(255,76,76,0.1)] px-2 py-0.5 rounded border border-[rgba(255,76,76,0.28)] tracking-wider">
+            VETO
           </span>
         )}
       </div>
@@ -52,9 +48,9 @@ export default function FindingCard({ finding, index = 0 }: FindingCardProps) {
       </p>
 
       {/* Recommendation */}
-      <div className="bg-[var(--surface)] rounded-lg p-3 border border-[var(--border)]">
-        <div className="text-xs font-semibold text-emerald-400 mb-1.5 uppercase tracking-wide">
-          💡 Recommendation
+      <div className="bg-[#0b0d11] rounded-lg p-3 border-l-2 border border-[var(--border)]" style={{ borderLeftColor: "var(--accent-line)" }}>
+        <div className="eyebrow mb-1.5" style={{ color: "var(--accent)" }}>
+          Recommended fix
         </div>
         <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
           {finding.recommendation}
@@ -64,11 +60,14 @@ export default function FindingCard({ finding, index = 0 }: FindingCardProps) {
       {/* Footer */}
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--border)]">
         <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-          <span>{agentInfo.icon}</span>
-          <span>{agentInfo.title || finding.source}</span>
+          <AgentBadge agent={finding.source} size={18} radius={5} />
+          <span className="mono">{meta.title}</span>
           {finding.verified && (
-            <span className="text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded text-[10px] font-bold">
-              ✓ VERIFIED
+            <span
+              className="mono px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider"
+              style={{ color: "var(--accent)", background: "var(--accent-quiet)" }}
+            >
+              VERIFIED
             </span>
           )}
         </div>

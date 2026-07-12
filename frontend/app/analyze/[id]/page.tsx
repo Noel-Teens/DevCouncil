@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useEffect, useState, useCallback, useMemo, use } from "react";
 import Link from "next/link";
+import { MessagesSquare, ScrollText, CircleCheck, CircleAlert, XCircle } from "lucide-react";
 import Navbar from "../../components/Navbar";
 import DiscussionRoom from "../../components/DiscussionRoom";
 import ConsensusReportView from "../../components/ConsensusReport";
 import { api } from "../../lib/api";
-import type { AnalysisResult, ConsensusReport } from "../../lib/types";
+import type { AgentEvent, AnalysisResult, ConsensusReport } from "../../lib/types";
 
 interface AnalyzePageProps {
   params: Promise<{ id: string }>;
@@ -19,6 +20,32 @@ export default function AnalyzePage({ params }: AnalyzePageProps) {
   const [activeTab, setActiveTab] = useState<"discussion" | "report">("discussion");
   const [isComplete, setIsComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Rebuild the discussion transcript from stored data once complete, so
+  // revisiting the Discussion Room shows the debate instead of a dead stream.
+  const staticEvents = useMemo<AgentEvent[] | null>(() => {
+    if (!isComplete || !analysisData || analysisData.status !== "complete") return null;
+    const evs: AgentEvent[] = [];
+    for (const output of analysisData.agent_outputs ?? []) {
+      for (const finding of output.findings ?? []) {
+        evs.push({
+          event_type: "finding",
+          agent_name: output.agent_name,
+          data: finding as unknown as Record<string, unknown>,
+          timestamp: "",
+        });
+      }
+    }
+    for (const turn of analysisData.discussion_turns ?? []) {
+      evs.push({
+        event_type: "discussion_message",
+        agent_name: turn.agent_name,
+        data: turn as unknown as Record<string, unknown>,
+        timestamp: "",
+      });
+    }
+    return evs;
+  }, [isComplete, analysisData]);
 
   const handleAnalysisComplete = useCallback(() => {
     setIsComplete(true);
@@ -51,78 +78,71 @@ export default function AnalyzePage({ params }: AnalyzePageProps) {
   }, [analysisId]);
 
   // Status badge for the navbar
+  const badgeState = isComplete ? (error ? "failed" : "complete") : "analyzing";
+  const badgeColor = badgeState === "failed" ? "#ff6b6b" : badgeState === "complete" ? "#c6f24e" : "#5eb1ef";
   const statusBadge = (
-    <div className="flex items-center gap-3">
-      {isComplete ? (
-        error ? (
-          <span className="flex items-center gap-1.5 text-xs text-red-400 bg-red-400/10 px-3 py-1 rounded-full border border-red-400/20">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-            Failed
-          </span>
-        ) : (
-          <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-400/10 px-3 py-1 rounded-full border border-emerald-400/20">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            Complete
-          </span>
-        )
-      ) : (
-        <span className="flex items-center gap-1.5 text-xs text-[var(--accent)] bg-[var(--accent)]/10 px-3 py-1 rounded-full border border-[var(--accent)]/20">
-          <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
-          Analyzing
-        </span>
+    <span
+      className="flex items-center gap-1.5 mono text-[11px] font-semibold px-2.5 py-1 rounded-md"
+      style={{ color: badgeColor, background: `${badgeColor}18`, border: `1px solid ${badgeColor}3d` }}
+    >
+      {badgeState === "failed" ? <CircleAlert size={12} /> : badgeState === "complete" ? <CircleCheck size={12} /> : (
+        <span className="w-1.5 h-1.5 rounded-full animate-pulse-glow" style={{ background: badgeColor }} />
       )}
-    </div>
+      {badgeState === "failed" ? "Failed" : badgeState === "complete" ? "Complete" : "Analyzing"}
+    </span>
   );
+
+  const repoName = analysisData?.repo_name || "Analysis";
+
+  const tabs = [
+    { id: "discussion" as const, label: "Discussion Room", Icon: MessagesSquare, count: null as number | null },
+    { id: "report" as const, label: "Consensus Report", Icon: ScrollText, count: report ? report.findings.length : null },
+  ];
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--background)]">
-      <Navbar
-        breadcrumb={analysisId.slice(0, 8) + "..."}
-        rightContent={statusBadge}
-      />
+      <Navbar breadcrumb={repoName} rightContent={statusBadge} />
 
-      {/* Tab bar */}
-      <div className="border-b border-[var(--border)] bg-[var(--background)] pt-14">
-        <div className="max-w-[1600px] mx-auto px-6">
-          <div className="flex gap-1">
-            <button
-              id="tab-discussion"
-              onClick={() => setActiveTab("discussion")}
-              className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === "discussion"
-                  ? "text-[var(--accent)] border-[var(--accent)]"
-                  : "text-[var(--text-muted)] border-transparent hover:text-[var(--text-secondary)]"
-              }`}
-            >
-              💬 Discussion Room
-            </button>
-            <button
-              id="tab-report"
-              onClick={() => setActiveTab("report")}
-              className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
-                activeTab === "report"
-                  ? "text-[var(--accent)] border-[var(--accent)]"
-                  : "text-[var(--text-muted)] border-transparent hover:text-[var(--text-secondary)]"
-              }`}
-            >
-              📊 Consensus Report
-              {report && (
-                <span className="bg-[var(--accent)]/10 text-[var(--accent)] text-[10px] px-1.5 py-0.5 rounded-full font-bold">
-                  {report.findings.length}
-                </span>
-              )}
-            </button>
+      {/* Sub-header + segmented tabs */}
+      <div className="border-b border-[var(--border)] pt-14" style={{ background: "rgba(7,8,9,0.6)", backdropFilter: "blur(8px)" }}>
+        <div className="max-w-[1500px] mx-auto px-6 py-3 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="eyebrow">Analysis</div>
+            <div className="heading text-[15px] text-[var(--text-primary)] truncate">{repoName}</div>
+          </div>
+          <div className="flex items-center gap-1 p-1 rounded-xl border border-[var(--border)] flex-shrink-0" style={{ background: "var(--surface)" }}>
+            {tabs.map((t) => {
+              const active = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  id={`tab-${t.id}`}
+                  onClick={() => setActiveTab(t.id)}
+                  className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-[13px] font-medium transition-all"
+                  style={active
+                    ? { background: "var(--accent)", color: "var(--accent-ink)" }
+                    : { color: "var(--text-muted)", background: "transparent" }}
+                >
+                  <t.Icon size={15} />
+                  <span className="hidden sm:inline">{t.label}</span>
+                  {t.count != null && (
+                    <span className="mono text-[10px] px-1.5 py-0.5 rounded font-semibold" style={active ? { background: "rgba(0,0,0,0.15)" } : { background: "var(--accent-quiet)", color: "var(--accent)" }}>{t.count}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 max-w-[1600px] mx-auto w-full px-6 py-6">
+      <div className="flex-1 max-w-[1500px] mx-auto w-full px-6 py-6">
         {activeTab === "discussion" && (
           <div className="h-[calc(100vh-180px)]">
             <DiscussionRoom
               analysisId={analysisId}
               onComplete={handleAnalysisComplete}
+              staticEvents={staticEvents}
             />
           </div>
         )}
@@ -132,10 +152,10 @@ export default function AnalyzePage({ params }: AnalyzePageProps) {
             {error ? (
               /* Error state — analysis failed */
               <div className="glass-card p-16 text-center animate-fade-in-up">
-                <div className="w-16 h-16 mx-auto mb-6 rounded-2xl flex items-center justify-center text-3xl bg-red-500/10">
-                  ❌
+                <div className="w-16 h-16 mx-auto mb-6 rounded-2xl flex items-center justify-center" style={{ background: "rgba(255,107,107,0.1)" }}>
+                  <XCircle size={30} className="text-[#ff6b6b]" />
                 </div>
-                <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
+                <h3 className="heading text-lg text-[var(--text-primary)] mb-2">
                   Analysis Failed
                 </h3>
                 <p className="text-sm text-[var(--text-muted)] max-w-md mx-auto mb-6">

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { FolderGit2, ArrowRight } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "./AuthProvider";
 
@@ -65,63 +66,47 @@ export default function RepoSelector() {
 
   if (loading) {
     return (
-      <div className="w-full max-w-4xl mx-auto mt-8 flex justify-center">
-        <div className="w-6 h-6 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
+      <div className="flex justify-center py-6">
+        <div className="w-5 h-5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
       </div>
     );
   }
 
-  if (error) {
-    return null; // Fail silently or show error in UI
-  }
-
-  if (repos.length === 0) {
-    return null; // Guest user or no repos
-  }
+  if (error) return null;
+  if (repos.length === 0) return null;
 
   return (
-    <div className="w-full max-w-4xl mx-auto mt-12 animate-fade-in-up">
-      <h3 className="text-sm font-bold text-[var(--text-muted)] uppercase tracking-widest mb-6">
-        Select a Repository to Analyze
-      </h3>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {repos.map((repo) => (
-          <button
-            key={repo.id}
-            onClick={() => handleSelectRepo(repo.html_url)}
-            className="text-left glass-card p-5 transition-all hover:border-[var(--accent)] hover:scale-[1.02] active:scale-[0.98] group relative overflow-hidden"
-          >
-            {/* Background glow on hover */}
-            <div className="absolute inset-0 bg-[var(--accent)] opacity-0 group-hover:opacity-5 transition-opacity duration-300" />
-            
-            <div className="flex items-start justify-between mb-2">
-              <h4 className="text-base font-bold text-[var(--text-primary)] truncate pr-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+      {repos.map((repo) => (
+        <button
+          key={repo.id}
+          onClick={() => handleSelectRepo(repo.html_url)}
+          className="text-left glass-card card-interactive group p-4"
+        >
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <span className="flex items-center gap-2 min-w-0">
+              <FolderGit2 size={15} className="text-[var(--text-muted)] flex-shrink-0" />
+              <span className="text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors truncate">
                 {repo.name}
-              </h4>
-              {repo.language && (
-                <span className="text-xs px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-[var(--text-muted)] whitespace-nowrap">
-                  {repo.language}
-                </span>
-              )}
-            </div>
-            
-            <p className="text-sm text-[var(--text-secondary)] line-clamp-2 min-h-[40px]">
-              {repo.description || "No description provided."}
-            </p>
-            
-            <div className="mt-4 flex items-center justify-between text-xs text-[var(--text-muted)]">
-              <span>{repo.full_name}</span>
-              <span className="text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 font-medium">
-                Analyze
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg>
               </span>
-            </div>
-          </button>
-        ))}
-      </div>
+            </span>
+            {repo.language && (
+              <span className="mono text-[10px] px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] whitespace-nowrap flex-shrink-0">
+                {repo.language}
+              </span>
+            )}
+          </div>
+          <p className="text-[12.5px] text-[var(--text-muted)] line-clamp-2 min-h-[34px] leading-relaxed">
+            {repo.description || "No description provided."}
+          </p>
+          <div className="mt-2 flex items-center justify-between mono text-[10px] text-[var(--text-faint)]">
+            <span className="truncate">{repo.full_name}</span>
+            <span className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" style={{ color: "var(--accent)" }}>
+              Analyze <ArrowRight size={11} />
+            </span>
+          </div>
+        </button>
+      ))}
     </div>
   );
 }

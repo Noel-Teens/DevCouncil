@@ -16,24 +16,49 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
+_SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+
+
+def _count_severities(findings: list[dict]) -> dict[str, int]:
+    counts = {s: 0 for s in _SEVERITIES}
+    verified = 0
+    for f in findings or []:
+        sev = str(f.get("severity", "")).upper()
+        if sev in counts:
+            counts[sev] += 1
+        if f.get("verified"):
+            verified += 1
+    counts["VERIFIED"] = verified
+    return counts
+
+
 @router.get("")
 async def list_reports():
-    """List all completed analyses (in-memory + persisted)."""
+    """List all completed analyses (in-memory + persisted) with severity stats."""
     reports: list[dict] = []
     seen: set[str] = set()
+    totals = {s: 0 for s in _SEVERITIES}
+    totals["VERIFIED"] = 0
+
+    def _accumulate(findings: list[dict]) -> dict[str, int]:
+        counts = _count_severities(findings)
+        for k, v in counts.items():
+            totals[k] = totals.get(k, 0) + v
+        return counts
 
     # In-memory results first (freshest)
     for analysis_id, result in _analysis_results.items():
         seen.add(analysis_id)
+        findings = result.get("consensus_report", {}).get("findings", []) if result.get("consensus_report") else []
+        counts = _accumulate(findings)
         reports.append({
             "analysis_id": analysis_id,
             "status": result.get("status", "unknown"),
             "repo_url": result.get("repo_url", ""),
             "repo_name": result.get("repo_name", ""),
             "completed_at": result.get("completed_at"),
-            "finding_count": len(
-                result.get("consensus_report", {}).get("findings", [])
-            ) if result.get("consensus_report") else 0,
+            "finding_count": len(findings),
+            "severity_counts": counts,
         })
 
     # Fall back to the database for anything not in memory
@@ -52,18 +77,21 @@ async def list_reports():
                         )
                     )
                 ).scalar_one_or_none()
+                findings = (report.findings or []) if report else []
+                counts = _accumulate(findings)
                 reports.append({
                     "analysis_id": a.id,
                     "status": a.status,
                     "repo_url": a.repo_url,
                     "repo_name": a.repo_name or "",
                     "completed_at": a.completed_at.isoformat() if a.completed_at else None,
-                    "finding_count": len(report.findings or []) if report else 0,
+                    "finding_count": len(findings),
+                    "severity_counts": counts,
                 })
     except Exception as e:
         logger.warning(f"Could not list reports from DB: {e}")
 
-    return {"reports": reports}
+    return {"reports": reports, "severity_totals": totals}
 
 
 @router.get("/{analysis_id}")

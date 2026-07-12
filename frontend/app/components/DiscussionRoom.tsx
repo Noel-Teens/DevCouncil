@@ -2,18 +2,26 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { AgentEvent } from "../lib/types";
+import { AgentBadge, AGENT_ORDER } from "../lib/agents";
 import { connectToAnalysis } from "../lib/sse";
 import AgentMessage from "./AgentMessage";
 
 interface DiscussionRoomProps {
   analysisId: string;
   onComplete?: () => void;
+  // When the analysis is already finished, the parent passes the stored
+  // transcript so we render it statically instead of reconnecting to a dead
+  // SSE stream (which would just hang on "Waiting for agents...").
+  staticEvents?: AgentEvent[] | null;
 }
 
-export default function DiscussionRoom({ analysisId, onComplete }: DiscussionRoomProps) {
-  const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [isStreaming, setIsStreaming] = useState(true);
-  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "done" | "error">("connecting");
+export default function DiscussionRoom({ analysisId, onComplete, staticEvents }: DiscussionRoomProps) {
+  const isStatic = staticEvents != null;
+  const [events, setEvents] = useState<AgentEvent[]>(staticEvents ?? []);
+  const [isStreaming, setIsStreaming] = useState(!isStatic);
+  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "done" | "error">(
+    isStatic ? "done" : "connecting"
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -23,6 +31,15 @@ export default function DiscussionRoom({ analysisId, onComplete }: DiscussionRoo
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
+
+  // If the transcript is supplied (completed analysis), render it and skip SSE.
+  useEffect(() => {
+    if (staticEvents != null) {
+      setEvents(staticEvents);
+      setIsStreaming(false);
+      setConnectionStatus("done");
+    }
+  }, [staticEvents]);
 
   const connect = useCallback(() => {
     // Clean up previous connection if any
@@ -69,11 +86,12 @@ export default function DiscussionRoom({ analysisId, onComplete }: DiscussionRoo
   }, [analysisId]);
 
   useEffect(() => {
+    if (isStatic) return; // completed analysis — nothing to stream
     connect();
     return () => {
       cleanupRef.current?.();
     };
-  }, [connect]);
+  }, [connect, isStatic]);
 
   // Auto-scroll
   useEffect(() => {
@@ -96,14 +114,28 @@ export default function DiscussionRoom({ analysisId, onComplete }: DiscussionRoo
   return (
     <div className="glass-card flex flex-col h-full" id="discussion-room">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
-        <div className="flex items-center gap-3">
-          <h2 className="text-base font-semibold text-[var(--text-primary)]">
-            Discussion Room
-          </h2>
-          <span className="text-xs text-[var(--text-muted)] bg-[var(--surface)] px-2 py-0.5 rounded-full">
-            {visibleEvents.length} events
-          </span>
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--border)]">
+        <div className="flex items-center gap-3.5">
+          {/* Participant stack */}
+          <div className="flex -space-x-2">
+            {AGENT_ORDER.map((p) => (
+              <AgentBadge
+                key={p}
+                agent={p}
+                size={28}
+                radius={8}
+                style={{ boxShadow: "0 0 0 2px var(--surface)" }}
+              />
+            ))}
+          </div>
+          <div>
+            <h2 className="font-display text-[15px] font-semibold text-[var(--text-primary)] leading-none">
+              Discussion Room
+            </h2>
+            <span className="mono text-[10px] text-[var(--text-muted)]">
+              {visibleEvents.length} events · 4 participants
+            </span>
+          </div>
         </div>
 
         {/* Status indicator */}
@@ -178,6 +210,12 @@ export default function DiscussionRoom({ analysisId, onComplete }: DiscussionRoo
               <div className="w-10 h-10 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
               <span className="text-sm">Waiting for agents...</span>
             </div>
+          </div>
+        )}
+
+        {visibleEvents.length === 0 && !isStreaming && (
+          <div className="flex items-center justify-center h-32 text-[var(--text-muted)] text-sm">
+            No discussion was recorded for this analysis.
           </div>
         )}
 

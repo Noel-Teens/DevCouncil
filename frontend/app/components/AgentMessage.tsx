@@ -1,5 +1,5 @@
 import type { AgentEvent } from "../lib/types";
-import { AGENT_INFO } from "../lib/types";
+import { AgentBadge, agentMeta } from "../lib/agents";
 
 interface AgentMessageProps {
   event: AgentEvent;
@@ -130,12 +130,7 @@ function formatMessageContent(text: string): {
 
 export default function AgentMessage({ event, index = 0 }: AgentMessageProps) {
   const agentKey = event.agent_name || "consensus_director";
-  const agentInfo = AGENT_INFO[agentKey] || {
-    icon: "🤖",
-    title: "System",
-    color: "#8b5cf6",
-    gradient: "linear-gradient(135deg, #8b5cf6, #6366f1)",
-  };
+  const meta = agentMeta(agentKey);
 
   const data = event.data || {};
   const eventType = event.event_type;
@@ -146,7 +141,7 @@ export default function AgentMessage({ event, index = 0 }: AgentMessageProps) {
 
   switch (eventType) {
     case "agent_start":
-      messageContent = data.message as string || `${agentInfo.title} is analyzing...`;
+      messageContent = data.message as string || `${meta.title} is analyzing...`;
       messageStyle = "info";
       break;
     case "agent_complete":
@@ -166,12 +161,12 @@ export default function AgentMessage({ event, index = 0 }: AgentMessageProps) {
       const turnType = turn.turn_type as string;
       const prefix =
         turnType === "challenge"
-          ? `⚔️ Challenges ${turn.target_agent || "another agent"}:`
+          ? `Challenges ${turn.target_agent || "another agent"}:`
           : turnType === "agree"
-          ? "✅ Agrees:"
+          ? "Agrees:"
           : turnType === "concede"
-          ? "🤝 Concedes:"
-          : "💡 New finding:";
+          ? "Concedes:"
+          : "New finding:";
       messageContent = `${prefix} ${turn.message || ""}`;
       messageStyle = turnType === "challenge" ? "challenge" : "info";
       break;
@@ -227,19 +222,14 @@ export default function AgentMessage({ event, index = 0 }: AgentMessageProps) {
       className="animate-slide-in-right flex gap-3 p-3"
       style={{ animationDelay: `${index * 60}ms` }}
     >
-      {/* Avatar */}
-      <div
-        className="agent-avatar"
-        style={{ background: agentInfo.gradient }}
-      >
-        {agentInfo.icon}
-      </div>
+      {/* Avatar — agent icon */}
+      <AgentBadge agent={agentKey} size={34} radius={9} />
 
       {/* Message */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-sm font-semibold" style={{ color: agentInfo.color }}>
-            {agentInfo.title}
+          <span className="text-sm font-semibold" style={{ color: meta.color }}>
+            {meta.title}
           </span>
           {eventType === "discussion_message" && turnTypeStr && (
             <span className={`turn-badge turn-${turnTypeStr}`}>

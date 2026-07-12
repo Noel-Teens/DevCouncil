@@ -32,53 +32,39 @@ export default function ConsensusReportView({ report }: ConsensusReportViewProps
 
   return (
     <div className="space-y-8" id="consensus-report">
-      {/* Executive Summary */}
-      <div className="glass-card p-6 animate-fade-in-up">
-        <h2 className="text-lg font-bold text-[var(--text-primary)] mb-3 flex items-center gap-2">
-          <span className="text-xl">📊</span>
-          Executive Summary
-        </h2>
-        <p className="text-[var(--text-secondary)] leading-relaxed">
+      {/* Executive Summary — the verdict */}
+      <div className="glass-card grad-border p-6 md:p-7 animate-fade-in-up relative overflow-hidden">
+        <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full pointer-events-none" style={{ background: "radial-gradient(circle, var(--accent-quiet), transparent 70%)" }} />
+        <div className="eyebrow mb-3 z-content relative" style={{ color: "var(--accent)" }}>The verdict</div>
+        <p className="text-[15px] text-[var(--text-secondary)] leading-relaxed z-content relative max-w-3xl">
           {report.executive_summary}
         </p>
 
-        {/* Stats bar */}
-        <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-[var(--border)]">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-[var(--text-muted)]">Findings:</span>
-            <span className="font-semibold text-[var(--text-primary)]">
-              {report.findings.length}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-[var(--text-muted)]">Agents:</span>
-            <span className="font-semibold text-[var(--text-primary)]">
-              {report.agents_that_participated.length}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-[var(--text-muted)]">Conflicts Resolved:</span>
-            <span className="font-semibold text-[var(--text-primary)]">
-              {report.conflicts_resolved.length}
-            </span>
-          </div>
-          {verifiedCount > 0 && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-emerald-400">✓ Bandit-verified:</span>
-              <span className="font-semibold text-emerald-400">
-                {verifiedCount}
-              </span>
+        {/* Metrics grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-[var(--border)] z-content relative">
+          {[
+            { label: "findings", value: report.findings.length, color: "var(--text-primary)" },
+            { label: "agents", value: report.agents_that_participated.length, color: "var(--text-primary)" },
+            { label: "conflicts resolved", value: report.conflicts_resolved.length, color: "var(--text-primary)" },
+            { label: "bandit-verified", value: verifiedCount, color: "var(--accent)" },
+          ].map((m) => (
+            <div key={m.label}>
+              <div className="display-lg" style={{ fontSize: "1.7rem", color: m.color }}>{m.value}</div>
+              <div className="mono text-[10px] uppercase tracking-wider text-[var(--text-muted)] mt-0.5">{m.label}</div>
             </div>
-          )}
-          {report.agents_that_failed.length > 0 && (
+          ))}
+        </div>
+
+        {report.agents_that_failed.length > 0 && (
+          <div className="flex flex-wrap gap-4 mt-4 z-content relative">
             <div className="flex items-center gap-2 text-sm">
               <span className="text-red-400">Failed:</span>
               <span className="font-semibold text-red-400">
                 {report.agents_that_failed.join(", ")}
               </span>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Findings by severity */}
@@ -101,7 +87,7 @@ export default function ConsensusReportView({ report }: ConsensusReportViewProps
                       ? "#eab308"
                       : severity === "LOW"
                       ? "#3b82f6"
-                      : "#8b5cf6",
+                      : "#94a3b8",
                   boxShadow:
                     severity === "CRITICAL"
                       ? "0 0 8px rgba(255, 59, 59, 0.5)"

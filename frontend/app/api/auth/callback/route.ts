@@ -27,8 +27,8 @@ export async function GET(request: NextRequest) {
     const data = await res.json();
     const token = data.access_token;
 
-    // Redirect to home with token in a query param (the AuthProvider will pick it up)
-    const redirectUrl = new URL("/", request.url);
+    // Redirect into the app with the token (AuthProvider picks it up + cleans the URL)
+    const redirectUrl = new URL("/dashboard", request.url);
     redirectUrl.searchParams.set("auth_token", token);
     return NextResponse.redirect(redirectUrl);
   } catch {

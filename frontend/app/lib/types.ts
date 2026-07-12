@@ -141,35 +141,39 @@ export interface AnalysisResult {
 
 export const AGENT_INFO: Record<
   string,
-  { name: string; title: string; color: string; icon: string; gradient: string }
+  { name: string; title: string; color: string; icon: string; abbr: string; gradient: string }
 > = {
   architect: {
     name: "architect",
-    title: "Architect Agent",
-    color: "#6366f1",
+    title: "Architect",
+    color: "#5eb1ef",
     icon: "🏗️",
-    gradient: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+    abbr: "AR",
+    gradient: "rgba(94, 177, 239, 0.13)",
   },
   security: {
     name: "security",
-    title: "Security Agent",
-    color: "#ef4444",
+    title: "Security",
+    color: "#ff6b6b",
     icon: "🛡️",
-    gradient: "linear-gradient(135deg, #ef4444, #f97316)",
+    abbr: "SE",
+    gradient: "rgba(255, 107, 107, 0.13)",
   },
   code_reviewer: {
     name: "code_reviewer",
     title: "Code Reviewer",
-    color: "#06b6d4",
+    color: "#ffb454",
     icon: "🔍",
-    gradient: "linear-gradient(135deg, #06b6d4, #3b82f6)",
+    abbr: "CR",
+    gradient: "rgba(255, 180, 84, 0.13)",
   },
   consensus_director: {
     name: "consensus_director",
     title: "Consensus Director",
-    color: "#f59e0b",
+    color: "#c6f24e",
     icon: "⚖️",
-    gradient: "linear-gradient(135deg, #f59e0b, #eab308)",
+    abbr: "CD",
+    gradient: "rgba(198, 242, 78, 0.13)",
   },
 };
 
