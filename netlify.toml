@@ -1,0 +1,9 @@
+# Netlify config for the Next.js frontend.
+# The Next runtime plugin turns SSR pages + API routes into serverless functions.
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
