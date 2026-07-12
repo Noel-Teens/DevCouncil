@@ -128,7 +128,50 @@ class ConsensusReportRecord(Base):
 # ──────────────────────────────────────────────
 
 settings = get_settings()
-engine = create_async_engine(settings.database_url, echo=False)
+
+
+def _normalize_pg_url(url: str) -> str:
+    """Make any Neon/psql-style Postgres URL work with the asyncpg driver.
+
+    Neon hands you a libpq URL like
+      postgresql://user:pw@host/db?sslmode=require&channel_binding=require
+    but our async engine needs the ``+asyncpg`` driver, and asyncpg does NOT
+    understand ``sslmode``/``channel_binding`` (those are handled via
+    connect_args instead). We also disable the dialect's prepared-statement
+    cache so the connection is safe through Neon's PgBouncer pooler.
+    """
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+
+    parts = urlsplit(url)
+    # Drop libpq-only params asyncpg rejects; keep everything else.
+    drop = {"sslmode", "channel_binding", "options"}
+    query = [(k, v) for k, v in parse_qsl(parts.query) if k.lower() not in drop]
+    # PgBouncer (Neon pooler) is transaction-pooled — named prepared statements
+    # break, so turn the dialect cache off.
+    if not any(k == "prepared_statement_cache_size" for k, _ in query):
+        query.append(("prepared_statement_cache_size", "0"))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _build_engine():
+    """Create the async engine, adapting connection args per backend."""
+    url = settings.database_url
+    if url.startswith(("postgresql", "postgres")):
+        return create_async_engine(
+            _normalize_pg_url(url),
+            echo=False,
+            pool_pre_ping=True,  # Neon suspends idle computes — reconnect transparently
+            connect_args={"ssl": "require", "statement_cache_size": 0},
+        )
+    return create_async_engine(url, echo=False)
+
+
+engine = _build_engine()
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
