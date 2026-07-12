@@ -75,11 +75,12 @@ async def github_callback(request: AuthCallbackRequest, response: Response, db: 
             detail="GitHub OAuth not configured. Use guest mode.",
         )
 
-    # Exchange code for access token
-    async with httpx.AsyncClient() as client:
+    # Exchange code for access token. GitHub's token endpoint is most reliable
+    # with a form-encoded body; Accept: application/json controls the response.
+    async with httpx.AsyncClient(timeout=20.0) as client:
         token_resp = await client.post(
             "https://github.com/login/oauth/access_token",
-            json={
+            data={
                 "client_id": settings.github_client_id,
                 "client_secret": settings.github_client_secret,
                 "code": request.code,
@@ -88,15 +89,17 @@ async def github_callback(request: AuthCallbackRequest, response: Response, db: 
         )
 
         if token_resp.status_code != 200:
+            logger.error(f"GitHub token endpoint returned {token_resp.status_code}: {token_resp.text[:300]}")
             raise HTTPException(status_code=400, detail="Failed to exchange OAuth code")
 
         token_data = token_resp.json()
         access_token = token_data.get("access_token")
         if not access_token:
-            raise HTTPException(
-                status_code=400,
-                detail=token_data.get("error_description", "OAuth failed"),
-            )
+            # Surface the ACTUAL GitHub error instead of a generic message.
+            gh_error = token_data.get("error", "unknown_error")
+            gh_desc = token_data.get("error_description", "")
+            logger.error(f"GitHub OAuth exchange failed: {gh_error} — {gh_desc} — client_id={settings.github_client_id}")
+            raise HTTPException(status_code=400, detail=f"{gh_error}: {gh_desc}".strip(": "))
 
         # Fetch user info
         user_resp = await client.get(
