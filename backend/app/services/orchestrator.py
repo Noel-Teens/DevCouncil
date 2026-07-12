@@ -33,6 +33,7 @@ from app.models.schemas import (
 from app.models.db import async_session
 from app.services.cache import cache_set_json
 from app.services.ingestion import ingest_repository
+from app.services.verification import verify_agent_outputs
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,72 @@ VAGUE_PHRASES = [
     "may introduce",
     "could potentially",
 ]
+
+
+_SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
+
+def _sev_str(finding: Finding) -> str:
+    return finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity)
+
+
+def _tokens(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9_]{3,}", (text or "").lower()))
+
+
+def _similarity(a: str, b: str) -> float:
+    """Jaccard token similarity between two finding descriptions."""
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def dedupe_findings(findings: list[Finding]) -> tuple[list[Finding], dict[str, str]]:
+    """Merge findings that describe the same underlying issue (any language).
+
+    Two findings collapse when they are in the SAME file and either point at the
+    same/adjacent lines describing a related issue, or their descriptions are
+    strongly similar. The surviving finding keeps the highest severity/confidence
+    and inherits any ``verified``/``veto`` status. Returns the deduped list plus a
+    map of dropped-id -> kept-id so action plans and conflicts can be rewritten.
+    """
+    kept: list[Finding] = []
+    id_remap: dict[str, str] = {}
+
+    for f in findings:
+        f_path = (f.file_path or "").replace("\\", "/").lower()
+        merged_into = None
+        for k in kept:
+            k_path = (k.file_path or "").replace("\\", "/").lower()
+            if not f_path or f_path != k_path:
+                continue
+            same_line = (
+                f.line_number is not None
+                and k.line_number is not None
+                and abs(f.line_number - k.line_number) <= 3
+            )
+            sim = _similarity(f.description, k.description)
+            if (f.line_number == k.line_number and f.line_number is not None) \
+                    or (same_line and sim >= 0.2) or sim >= 0.5:
+                merged_into = k
+                break
+
+        if merged_into is None:
+            kept.append(f)
+            id_remap[f.id] = f.id
+            continue
+
+        id_remap[f.id] = merged_into.id
+        if _SEVERITY_RANK.get(_sev_str(f), 4) < _SEVERITY_RANK.get(_sev_str(merged_into), 4):
+            merged_into.severity = f.severity
+        merged_into.confidence = max(merged_into.confidence, f.confidence)
+        merged_into.verified = merged_into.verified or f.verified
+        merged_into.veto_active = merged_into.veto_active or f.veto_active
+        if f.verified and merged_into.source != "bandit":
+            merged_into.source = f.source
+
+    return kept, id_remap
 
 
 def ground_findings_with_bandit(
@@ -364,6 +431,22 @@ async def run_analysis_pipeline(
                 data={"message": "All agents failed. Cannot produce analysis."},
             ))
             return
+
+        # ── Verification pass (language-agnostic false-positive filter) ──
+        agent_outputs, verify_stats = await verify_agent_outputs(agent_outputs, context)
+        if verify_stats["dropped"] or verify_stats["downgraded"]:
+            await emit_event(analysis_id, AgentEvent(
+                event_type=EventType.STATUS_UPDATE,
+                data={
+                    "status": AnalysisStatus.ANALYZING,
+                    "message": (
+                        f"Verified {verify_stats['checked']} findings against source: "
+                        f"dropped {verify_stats['dropped']} false positive(s), "
+                        f"downgraded {verify_stats['downgraded']}."
+                    ),
+                    "verification": verify_stats,
+                },
+            ))
 
         # ── Phase 2: Structured Debate (Fix 2) ──
         await emit_event(analysis_id, AgentEvent(
@@ -636,7 +719,20 @@ async def _run_consensus(
 ) -> ConsensusReport:
     """Phase 3: Consensus Director synthesis."""
     director = ConsensusDirectorAgent()
-    return await director.synthesize(agent_outputs, discussion_turns, failed_agents)
+    report = await director.synthesize(agent_outputs, discussion_turns, failed_agents)
+
+    # Deterministic safety net: merge any same-issue findings the LLM missed,
+    # then rewrite action-plan / conflict finding-id references through the remap.
+    report.findings, id_remap = dedupe_findings(report.findings)
+    for action in report.action_plan:
+        action.finding_ids = list(dict.fromkeys(
+            id_remap.get(i, i) for i in action.finding_ids
+        ))
+    for conflict in report.conflicts_resolved:
+        conflict.finding_ids = list(dict.fromkeys(
+            id_remap.get(i, i) for i in conflict.finding_ids
+        ))
+    return report
 
 
 async def _create_analysis_row(analysis_id: str, repo_url: str, user_id: str | None):
