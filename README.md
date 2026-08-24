@@ -495,7 +495,13 @@ The disagreement is not a UX feature. It is an architectural property. Separate 
 
 ## The Team
 
-Built at HACKHAZARDS '26 · June 2025
+**TEAM 777** · Built at HACKHAZARDS '26 · June 2025
+
+| Member | GitHub |
+|---|---|
+| Teenie Rod Joshua B | [@Noel-Teens](https://github.com/Noel-Teens) |
+| Sandhiya SL | [@SANDHYA098-afk](https://github.com/SANDHYA098-afk) |
+| Mithilesh K | [@mithilesh042006](https://github.com/mithilesh042006) |
 
 ---
 
