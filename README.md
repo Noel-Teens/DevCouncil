@@ -19,10 +19,6 @@
 
 <!-- **[Live Demo](https://devcouncil.ai)** · **[Watch 3-Min Demo Video](#)** · **[Read the Docs](#documentation)** -->
 
-<br/>
-
-> *"Seven AI agents just argued about my codebase — and they were all right about different things."*
-> — first user who ran a demo analysis
 
 </div>
 
