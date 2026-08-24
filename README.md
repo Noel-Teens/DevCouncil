@@ -18,7 +18,7 @@
 <br/>
 
 <!-- **[Live Demo](https://devcouncil.ai)** · **[Watch 3-Min Demo Video](#)** · **[Read the Docs](#documentation)** -->
-
+<br/>
 
 </div>
 
