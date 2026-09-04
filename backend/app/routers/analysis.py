@@ -22,6 +22,7 @@ from app.models.schemas import (
 )
 from app.services.cache import cache_get_json, cache_set_json, check_rate_limit
 from app.services.demo_runner import list_scenarios, load_scenario, run_demo_replay
+from app.services.ingestion import normalize_repo_url
 from app.services.orchestrator import (
     get_analysis_result,
     get_event_queue,
@@ -60,8 +61,9 @@ async def create_analysis(
             detail="Daily analysis limit reached. Please try again tomorrow.",
         )
 
-    # Check cache
-    cached = await cache_get_json(f"analysis:{repo_url}")
+    # Check cache (normalized so http/https, trailing slash, .git all collide)
+    cache_key = normalize_repo_url(repo_url)
+    cached = await cache_get_json(f"analysis:{cache_key}")
     if cached:
         logger.info(f"Returning cached analysis for {repo_url}")
         return AnalysisResponse(

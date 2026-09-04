@@ -32,7 +32,7 @@ from app.models.schemas import (
 )
 from app.models.db import async_session
 from app.services.cache import cache_set_json
-from app.services.ingestion import ingest_repository
+from app.services.ingestion import ingest_repository, normalize_repo_url
 from app.services.verification import verify_agent_outputs
 
 logger = logging.getLogger(__name__)
@@ -494,9 +494,12 @@ async def run_analysis_pipeline(
                 cost_usd=cost_usd,
             )
 
-        # Populate the response cache so a repeat submit returns instantly
+        # Populate the response cache so a repeat submit returns instantly.
+        # Normalized key so http/https, trailing slash, and .git share one entry.
         await cache_set_json(
-            f"analysis:{repo_url}", {"analysis_id": analysis_id}, ttl_seconds=86400
+            f"analysis:{normalize_repo_url(repo_url)}",
+            {"analysis_id": analysis_id},
+            ttl_seconds=86400,
         )
 
         await emit_event(analysis_id, AgentEvent(

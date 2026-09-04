@@ -81,6 +81,21 @@ def parse_github_url(url: str) -> tuple[str, str]:
     raise ValueError(f"Invalid GitHub URL: {url}")
 
 
+def normalize_repo_url(url: str) -> str:
+    """Return a canonical repo URL for cache keys and dedup.
+
+    Collapses the variants that all point at the same repo — http vs https,
+    a trailing slash, a ``.git`` suffix, and casing — into one stable string
+    ``https://github.com/{owner}/{repo}`` so they share a single cache entry.
+    Falls back to the trimmed input if the URL can't be parsed.
+    """
+    try:
+        owner, repo = parse_github_url(url)
+        return f"https://github.com/{owner}/{repo}".lower()
+    except ValueError:
+        return url.strip().lower()
+
+
 def detect_language(ext: str) -> str | None:
     """Map file extension to language name."""
     return LANGUAGE_MAP.get(ext)
