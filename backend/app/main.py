@@ -25,6 +25,17 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     logger.info("Starting DevCouncil AI Backend...")
+
+    # Guard against shipping the placeholder JWT secret — with it, every token
+    # (including guest sessions) is trivially forgeable.
+    if get_settings().jwt_secret in ("", "change-this-in-production"):
+        logger.warning(
+            "JWT_SECRET is unset or using the default placeholder. "
+            "Set a strong random JWT_SECRET before deploying — tokens are "
+            "forgeable otherwise. Generate one with: "
+            "python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+
     await init_db()
     logger.info("Database initialized")
     yield
