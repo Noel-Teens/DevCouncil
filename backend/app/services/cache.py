@@ -97,11 +97,14 @@ async def check_rate_limit(user_id: str, max_per_day: int = 5) -> bool:
     # In-memory fallback — enforce a real per-process, per-day limit so the
     # rate limit still holds when Redis is not configured (the default).
     now = time.time()
-    window_start, count = _memory_rate_limit.get(user_id, (now, 0))
 
-    # Reset the counter once the 24h window has elapsed.
-    if now - window_start >= 86400:
-        window_start, count = now, 0
+    # Evict expired windows so the store can't grow unbounded (one entry per
+    # unique user, never cleaned, would leak over a long-running process).
+    expired = [uid for uid, (ws, _) in _memory_rate_limit.items() if now - ws >= 86400]
+    for uid in expired:
+        del _memory_rate_limit[uid]
+
+    window_start, count = _memory_rate_limit.get(user_id, (now, 0))
 
     if count >= max_per_day:
         return False
