@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+import { BACKEND_URL } from "@/app/lib/config";
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");

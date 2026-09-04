@@ -3,8 +3,7 @@
  */
 
 import type { AgentEvent, EventType } from "./types";
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+import { BACKEND_URL } from "./config";
 
 export type EventCallback = (event: AgentEvent) => void;
 export type ErrorCallback = (error: Event) => void;

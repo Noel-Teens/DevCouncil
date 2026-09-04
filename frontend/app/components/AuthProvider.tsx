@@ -8,6 +8,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
+import { BACKEND_URL } from "@/app/lib/config";
 
 interface User {
   id: string;
@@ -39,9 +40,6 @@ const AuthContext = createContext<AuthContextType>({
 export function useAuth() {
   return useContext(AuthContext);
 }
-
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);

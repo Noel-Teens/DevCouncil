@@ -3,9 +3,8 @@
  * Includes JWT token from localStorage for authenticated requests.
  */
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-
 import type { AnalysisResponse, AnalysisResult } from "./types";
+import { BACKEND_URL } from "./config";
 
 class ApiClient {
   private baseUrl: string;
