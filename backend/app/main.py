@@ -65,8 +65,11 @@ _allowed_origins = list(dict.fromkeys(_allowed_origins + _extra))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    # Allow any Netlify/Vercel deploy (branch builds + previews change the subdomain).
-    allow_origin_regex=r"https://([a-z0-9-]+\.)*(netlify\.app|vercel\.app)$",
+    # Allow Netlify/Vercel deploys (branch builds + previews change the subdomain).
+    # Exactly ONE subdomain label — the previous `([a-z0-9-]+\.)*` matched any
+    # depth, so an attacker-controlled `evil.foo.netlify.app` also passed with
+    # credentials. Preview URLs only ever use a single label.
+    allow_origin_regex=r"https://[a-z0-9-]+\.(netlify\.app|vercel\.app)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
