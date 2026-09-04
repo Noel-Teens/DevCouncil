@@ -218,6 +218,11 @@ No preamble, no explanation outside the JSON."""
                     reason=c.get("reason", ""),
                 ))
 
+            # Enforce veto power deterministically: a vetoed or verified CRITICAL
+            # finding cannot be dropped by the Director LLM. Re-inject any that the
+            # LLM omitted so the guarantee lives in code, not just the prompt.
+            findings = self._enforce_veto(agent_outputs, findings)
+
             participated = data.get(
                 "agents_that_participated",
                 [o.agent_name for o in agent_outputs],
@@ -236,6 +241,39 @@ No preamble, no explanation outside the JSON."""
             logger.error(f"Consensus Director failed: {e}")
             # Deterministic fallback: merge all findings, sort by severity
             return self._deterministic_fallback(agent_outputs, failed_agents)
+
+    def _enforce_veto(
+        self,
+        agent_outputs: list[AgentOutput],
+        findings: list[Finding],
+    ) -> list[Finding]:
+        """Guarantee that vetoed/verified CRITICAL findings survive consensus.
+
+        A locked finding is any CRITICAL that is ``veto_active`` or ``verified``
+        (grounded in static analysis). If the Director LLM omitted one, it is
+        re-inserted. Matching is by (file_path, line_number, category) so a
+        finding the Director merely reworded still counts as present.
+        """
+        def _sev(value) -> str:
+            return getattr(value, "value", value)
+
+        def _key(f: Finding) -> tuple:
+            return (f.file_path, f.line_number, f.category)
+
+        kept_keys = {_key(f) for f in findings}
+        for output in agent_outputs:
+            for finding in output.findings:
+                locked = _sev(finding.severity) == "CRITICAL" and (
+                    finding.veto_active or finding.verified
+                )
+                if locked and _key(finding) not in kept_keys:
+                    logger.warning(
+                        "Re-injecting vetoed CRITICAL finding dropped by Director: "
+                        f"{finding.file_path}:{finding.line_number} ({finding.category})"
+                    )
+                    findings.append(finding)
+                    kept_keys.add(_key(finding))
+        return findings
 
     def _deterministic_fallback(
         self,
