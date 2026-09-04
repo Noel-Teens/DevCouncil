@@ -5,6 +5,7 @@ Falls back to in-memory cache if Redis is unavailable.
 
 import json
 import logging
+import time
 from typing import Any
 
 from app.config import get_settings
@@ -13,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 _memory_cache: dict[str, str] = {}
 _redis_client = None
-
+# Fallback rate-limit store: user_id -> (window_start_epoch, count)
+_memory_rate_limit: dict[str, tuple[float, int]] = {}
 
 async def get_redis():
     """Get or create Redis client."""
@@ -40,7 +42,6 @@ async def get_redis():
         logger.warning(f"Redis connection failed, using in-memory cache: {e}")
         return None
 
-
 async def cache_get(key: str) -> str | None:
     """Get a value from cache."""
     client = await get_redis()
@@ -50,7 +51,6 @@ async def cache_get(key: str) -> str | None:
         except Exception:
             pass
     return _memory_cache.get(key)
-
 
 async def cache_set(key: str, value: str, ttl_seconds: int = 3600) -> None:
     """Set a value in cache with TTL."""
@@ -63,7 +63,6 @@ async def cache_set(key: str, value: str, ttl_seconds: int = 3600) -> None:
             pass
     _memory_cache[key] = value
 
-
 async def cache_get_json(key: str) -> Any | None:
     """Get a JSON value from cache."""
     raw = await cache_get(key)
@@ -74,11 +73,9 @@ async def cache_get_json(key: str) -> Any | None:
             return None
     return None
 
-
 async def cache_set_json(key: str, value: Any, ttl_seconds: int = 3600) -> None:
     """Set a JSON value in cache."""
     await cache_set(key, json.dumps(value), ttl_seconds)
-
 
 async def check_rate_limit(user_id: str, max_per_day: int = 5) -> bool:
     """Check if user has exceeded daily rate limit. Returns True if allowed."""
@@ -96,5 +93,18 @@ async def check_rate_limit(user_id: str, max_per_day: int = 5) -> bool:
             return True
         except Exception:
             pass
-    # In-memory fallback — always allow
+
+    # In-memory fallback — enforce a real per-process, per-day limit so the
+    # rate limit still holds when Redis is not configured (the default).
+    now = time.time()
+    window_start, count = _memory_rate_limit.get(user_id, (now, 0))
+
+    # Reset the counter once the 24h window has elapsed.
+    if now - window_start >= 86400:
+        window_start, count = now, 0
+
+    if count >= max_per_day:
+        return False
+
+    _memory_rate_limit[user_id] = (window_start, count + 1)
     return True
